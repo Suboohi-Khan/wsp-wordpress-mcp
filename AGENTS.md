@@ -117,8 +117,14 @@ website shows is derived from it. Generated artifacts live **only** in the websi
 
 **Tooling (`bin/`, dev-only — never shipped in the plugin zip):**
 - `bin/lib-abilities.php` — loads `registry.php` in a minimal WP stub (defines `ABSPATH`, stubs
-  `wsp_yoast_is_active()` / `wsp_elementor_is_active()` / `wsp_acf_is_active()` / a `WooCommerce`
-  class so **all** plugin-gated groups render), then exposes the registry + totals.
+  `wsp_yoast_is_active()` / `wsp_rankmath_is_active()` / `wsp_elementor_is_active()` /
+  `wsp_acf_is_active()` / `wsp_uae_is_active()` / `wsp_gravity_is_active()` / `wsp_cf7_is_active()` /
+  `wsp_wpforms_is_active()` / a `WooCommerce` class so **all** plugin-gated groups render), then
+  exposes the registry + totals. **When you add a plugin-gated group to `registry.php`, you MUST add
+  its active-check stub here too** — otherwise the registry's real check returns false in the
+  generator environment and the whole group is silently dropped from the website (this is exactly
+  what happened to the Contact Form 7 + WPForms groups — they shipped in `registry.php` for v2.6.6
+  but never reached the site until the stubs were added here).
 - `bin/generate-abilities-md.php` — prints `abilities.md` (default) or `abilities.json` (`--json`).
 - `bin/patch-website.php <html> <sitemap>` — rewrites the `var ABILITIES = [ … ];` array inside
   the site's `abilities-directory.html` in place, and bumps the `<lastmod>` for that page in
