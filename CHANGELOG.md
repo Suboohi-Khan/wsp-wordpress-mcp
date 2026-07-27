@@ -8,6 +8,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.6.6] — 2026-07-27
+
+### Added — Direct (base64) file upload for media (`includes/abilities/media.php`, `includes/tools/native-tools.php`, `includes/registry.php`)
+- **`wsp_upload_media` now accepts base64 file content**, so an MCP client can upload a file attached to the chat **directly** into the media library — no public URL required. Fixes GitHub issue #17 ("still can't upload it directly"). Previously the only path was `url`, forcing users to host the image somewhere (e.g. Google Drive) first.
+  - New optional inputs on `wsp_upload_media`: `data` (base64 string; a `data:<mime>;base64,` prefix is accepted and stripped) and `mime_type` (used to infer the extension when `data` has no data-URI prefix and `filename` has no extension). `url` is now optional — pass **either** `data` **or** `url`; `data` wins if both are present.
+  - New callback `wsp_execute_upload_media_from_data()` in `media.php`: normalizes URL-safe/whitespaced base64, `base64_decode(..., true)` with strict validation, resolves a safe filename with an allowed image extension, writes the bytes to a `wp_tempnam()` temp file, and sideloads through `media_handle_sideload()` (same `upload_mimes` / `wp_check_filetype_and_ext` filters as the URL uploader). `wsp_execute_upload_media()` is no longer a thin wrapper — it routes to the base64 path when `data` is present, otherwise to `wsp_execute_upload_media_from_url()`.
+  - **Security unchanged:** still requires `upload_files`; only image types (jpg, jpeg, png, gif, webp) are accepted; temp files are cleaned up on failure. No other tool, callback, or file behavior was modified.
+
 ## [2.6.5] — 2026-07-21
 
 ### Added — Elementor Advanced Design Tools (`includes/abilities/elementor.php`, `includes/tools/native-tools.php`, `includes/registry.php`)

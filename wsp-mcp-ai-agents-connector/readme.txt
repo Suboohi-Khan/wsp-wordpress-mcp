@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.0.1
 Requires PHP: 7.4
-Stable tag: 2.6.5
+Stable tag: 2.6.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -144,6 +144,9 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.6.6 =
+* New: Direct file upload for media. `wsp_upload_media` (Upload Media) now accepts base64 file content via a new `data` parameter — an MCP client can upload a file attached to the chat straight into the media library without first hosting it at a public URL. The `url` parameter still works as before; pass either one. An optional `mime_type` hint and `data:` URI prefixes are supported. Only image types (jpg, png, gif, webp) are allowed, decoded bytes are written through `media_handle_sideload()`, and the tool still requires `upload_files`. Fixes GitHub #17.
 
 = 2.6.5 =
 * New: Elementor Advanced Design Tools — 11 tools for high-fidelity design workflows: get/update active kit, regenerate CSS, get widget schema, duplicate/move element, convert CSS to Elementor settings, get/update page settings, copy styles, and get breakpoints. All off by default under the "Elementor" group. Security: write tools run settings through `wsp_elementor_sanitize_settings()` (strips `custom_css`, `custom_attributes`, and dynamic keys); `update-active-kit` and `regenerate-css` require `manage_options`, the rest require `edit_posts`.

@@ -31,7 +31,7 @@ These three files give you complete project understanding without touching the c
 ## What this plugin is
 
 **Plugin Name:** WSP MCP - AI Agents Connector  
-**Version:** 2.6.5
+**Version:** 2.6.6
 **Slug/prefix:** `wsp`  
 **WP option key:** `wsp_mcp_abilities`  
 **Constant prefix:** `WSP_MCP_`
@@ -187,7 +187,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
 
 | Constant | Value |
 |---|---|
-| `WSP_MCP_VERSION` | `'2.6.5'` |
+| `WSP_MCP_VERSION` | `'2.6.6'` |
 | `WSP_MCP_OPTION` | `'wsp_mcp_abilities'` (per-ability on/off toggles) |
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 
@@ -301,11 +301,11 @@ admin toggle for each is driven by its entry in `wsp_mcp_ability_registry()` (`r
 | `wsp/count-media` | Count Media | read | OFF | `upload_files` | — (counts grouped by MIME type + total) |
 | `wsp/update-media` | Update Media | write | OFF | `upload_files` | `id` (req), `title`, `alt`, `caption`, `description` |
 | `wsp/delete-media` | Delete Media | write | OFF | `delete_posts` | `id` (req) — permanent `wp_delete_attachment()` |
-| `wsp/upload-media` | Upload Media | write | OFF | `upload_files` | `url` (req), `filename`, `title`, `alt`, `caption`, `post_id` |
+| `wsp/upload-media` | Upload Media | write | OFF | `upload_files` | **`data`** (base64) *or* `url` (one req), `mime_type`, `filename`, `title`, `alt`, `caption`, `post_id` |
 | `wsp/upload-media-from-url` | Upload Media From URL | write | OFF | `upload_files` | `url` (req), `filename`, `title`, `alt`, `caption`, `post_id` |
 
 - `wsp/get-media` returns the full metadata of a **single** attachment by ID (browse/search moved to `wsp/list-media`).
-- Uploads sideload via `download_url()` + `media_handle_sideload()` (requires `wp-admin/includes/{file,media,image}.php`, loaded inside the callback). `wsp_execute_upload_media()` is a thin wrapper over `wsp_execute_upload_media_from_url()`.
+- Uploads sideload via `download_url()` (URL path) or `wp_tempnam()` + `file_put_contents()` (base64 path), then `media_handle_sideload()` (requires `wp-admin/includes/{file,media,image}.php`, loaded inside the callback). `wsp_execute_upload_media()` routes to `wsp_execute_upload_media_from_data()` when a non-empty `data` (base64) input is present, otherwise to `wsp_execute_upload_media_from_url()`. The base64 path (v2.6.6, fixes #17) strips an optional `data:<mime>;base64,` prefix, normalizes URL-safe base64, strictly validates via `base64_decode(..., true)`, and infers the extension from `filename`/`mime_type`/data-URI. Both paths accept only image types (jpg, png, gif, webp).
 - `wsp_media_item_data()` is the shared normalizer used by get/update/upload responses.
 
 #### Users (`users.php`)
