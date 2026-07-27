@@ -14,6 +14,11 @@
 
 ---
 
+
+## ✨ What's New in v2.6.6
+
+New: Direct file upload for media. wsp_upload_media (Upload Media) now accepts base64 file content via a new data parameter — an MCP client can upload a file attached to the chat straight into the media library without first hosting it at a public URL. The url parameter still works as before; pass either one. An optional mime_type hint and data: URI prefixes are supported. Only image types (jpg, png, gif, webp) are allowed, decoded bytes are written through media_handle_sideload(), and the tool still requires upload_files.
+
 ## ✨ What's New in v2.6.5
 
 - 🎨 **Elementor Advanced Design Tools (11 tools)** — new tools for high-fidelity design work, all OFF by default and toggled from **MCP > Settings** under the "Elementor" group. Read the active kit's global colors, fonts, and layout (`get-active-kit`) and update them (`update-active-kit`); regenerate the Elementor CSS cache (`regenerate-css`); fetch a widget's full control schema — margins, padding, typography, borders (`get-widget-schema`); duplicate an element with fresh unique IDs (`duplicate-element`) or move it to a new spot (`move-element`); turn plain CSS into Elementor settings (`convert-css`); read/update page-level settings like template and background (`get-page-settings` / `update-page-settings`); copy one element's styles onto another (`copy-styles`); and read the responsive breakpoints (`get-breakpoints`). Every write tool runs through the same `wsp_elementor_sanitize_settings()` guard as the rest of the Elementor suite, so no code can be injected. `update-active-kit` and `regenerate-css` require `manage_options`; the rest require `edit_posts`.
