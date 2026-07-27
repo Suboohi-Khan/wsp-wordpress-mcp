@@ -234,14 +234,16 @@ function wsp_mcp_register_native_tools() {
 		'enable_key'  => 'wsp/delete-media',
 	) );
 	WSP_MCP_Server::register_tool( 'wsp_upload_media', array(
-		'description' => 'Upload an image or file from a URL directly into the WordPress media library.',
-		'inputSchema' => array( 'type' => 'object', 'required' => array( 'url' ), 'properties' => array(
-			'url'      => array( 'type' => 'string', 'description' => 'Source URL of the file to upload.' ),
-			'filename' => array( 'type' => 'string', 'description' => 'Optional destination filename.' ),
-			'title'    => array( 'type' => 'string' ),
-			'alt'      => array( 'type' => 'string' ),
-			'caption'  => array( 'type' => 'string' ),
-			'post_id'  => array( 'type' => 'integer', 'description' => 'Optional post ID to attach the media to.' ),
+		'description' => 'Upload an image into the WordPress media library. Provide EITHER "data" (base64-encoded file content — use this to upload a file attached to the chat directly, no public URL required) OR "url" (a public link to fetch). Supported types: jpg, png, gif, webp.',
+		'inputSchema' => array( 'type' => 'object', 'properties' => array(
+			'data'      => array( 'type' => 'string', 'description' => 'Base64-encoded file content. A "data:<mime>;base64," prefix is accepted. Use this to upload a file straight from the chat without a URL.' ),
+			'mime_type' => array( 'type' => 'string', 'description' => 'MIME type of the base64 data (e.g. image/png), used when "data" has no data-URI prefix and "filename" has no extension.' ),
+			'url'       => array( 'type' => 'string', 'description' => 'Source URL of the file to upload (used only when "data" is not provided).' ),
+			'filename'  => array( 'type' => 'string', 'description' => 'Optional destination filename.' ),
+			'title'     => array( 'type' => 'string' ),
+			'alt'       => array( 'type' => 'string' ),
+			'caption'   => array( 'type' => 'string' ),
+			'post_id'   => array( 'type' => 'integer', 'description' => 'Optional post ID to attach the media to.' ),
 		) ),
 		'callback'    => 'wsp_execute_upload_media',
 		'capability'  => 'upload_files',

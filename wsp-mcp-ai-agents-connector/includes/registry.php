@@ -71,7 +71,7 @@ function wsp_mcp_ability_registry() {
         'wsp/count-media'           => array( 'label' => 'Count Media',          'description' => 'Get media library counts grouped by MIME type, plus a total.',             'group' => 'Media', 'access' => 'read',  'default' => false ),
         'wsp/update-media'          => array( 'label' => 'Update Media',         'description' => 'Update the title, alt text, caption, or description of a media file by ID.', 'group' => 'Media', 'access' => 'write', 'default' => false ),
         'wsp/delete-media'          => array( 'label' => 'Delete Media',         'description' => 'Permanently delete a media file from the media library by ID.',            'group' => 'Media', 'access' => 'write', 'default' => false ),
-        'wsp/upload-media'          => array( 'label' => 'Upload Media',         'description' => 'Upload an image or file from a URL directly into the media library.',       'group' => 'Media', 'access' => 'write', 'default' => false ),
+        'wsp/upload-media'          => array( 'label' => 'Upload Media',         'description' => 'Upload an image into the media library from base64 file content (attach a file directly in chat) or a URL.',       'group' => 'Media', 'access' => 'write', 'default' => false ),
         'wsp/upload-media-from-url' => array( 'label' => 'Upload Media From URL', 'description' => 'Pull an image from any web link straight into your media library.',         'group' => 'Media', 'access' => 'write', 'default' => false ),
         'wsp/set-featured-image'    => array( 'label' => 'Set Featured Image',    'description' => 'Set an image as the featured image (thumbnail) for a post or page.',        'group' => 'Media', 'access' => 'write', 'default' => false ),
         // USERS
