@@ -8,6 +8,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed — Website sync dropped Contact Form 7 + WPForms groups (`bin/lib-abilities.php`)
+- **The public Abilities Directory on freewordpressmcp.com was missing every Contact Form 7 (10) and WPForms (12) tool**, even though both groups have shipped in `registry.php` since v2.6.6. Root cause: the website-sync generator loads `registry.php` in a stub environment (`bin/lib-abilities.php`), and that stub force-activates every plugin-gated group by defining its `wsp_*_is_active()` check to return `true`. Stubs existed for Yoast, Rank Math, Elementor, ACF, UAE, Gravity Forms, and WooCommerce — but **not** for `wsp_cf7_is_active()` / `wsp_wpforms_is_active()`. Without them, `registry.php`'s own real checks ran (`class_exists('WPCF7_ContactForm')` / `function_exists('wpforms')`), both returned false in the PHP-CLI generator, and the two groups were silently skipped. This is why the automated sync PR only ever produced a trivial diff and never surfaced the 2.6.6 form tools.
+- **Fix:** added `wsp_cf7_is_active()` and `wsp_wpforms_is_active()` stubs (return `true`) to `bin/lib-abilities.php`, alongside the existing ones. The generator now emits all groups; `patch-website.php` regenerates both the `ABILITIES` array and the `GROUPS` map, so the site picks up CF7 + WPForms automatically on the next `main` push. Dev-tooling only — no plugin runtime code, tool, or shipped-zip behavior changed (the plugin already registered these tools correctly at runtime).
+- **Guardrail:** documented in `AGENTS.md` ("Website sync automation") that any new plugin-gated group added to `registry.php` MUST get a matching active-check stub in `bin/lib-abilities.php`, or it will be dropped from the site.
+
 ## [2.6.6] — 2026-07-27
 
 ### Added — Direct (base64) file upload for media (`includes/abilities/media.php`, `includes/tools/native-tools.php`, `includes/registry.php`)
