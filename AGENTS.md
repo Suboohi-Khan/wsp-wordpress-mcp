@@ -177,6 +177,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
         ├── tools/
         │   └── native-tools.php ← registers every wsp_execute_* as a native MCP tool
         ├── admin/
+        │   ├── promo-cards.php      ← shared sidebar cards + UTM link builder (both admin pages)
         │   ├── settings-page.php    ← toggle UI (MCP > Settings) — accordion groups + legacy-page redirect
         │   └── connection-page.php  ← native endpoint + API key + per-client tabs (MCP > Connection)
         └── abilities/           ← wsp_execute_* logic (called by the native server)
@@ -586,10 +587,16 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
 - Groups abilities by `group` field from registry, displays toggle switches.
 - Stats bar: total abilities, enabled count, active write count.
 - **Collapsible accordion groups:** each `group` renders as a `.wsp-group` whose `.wsp-gh` header
-  toggles a `.wsp-gbody` (the rows). **All groups start collapsed.** The header shows a count badge
-  (`enabled / total`, green when any are on) that updates live via JS as toggles change. Open/closed
-  state persists per-browser in `localStorage` key `wsp_acc_open` (array of group names). The chevron
+  toggles a `.wsp-gbody` (the rows). **All groups start collapsed.** Open/closed state persists
+  per-browser in `localStorage` key `wsp_acc_open` (array of group names). The chevron
   (`.wsp-chev`) rotates on the `.wsp-open` class.
+- **Header tally (v2.6.7):** each group header shows two pills inside `.wsp-gcounts` — `N Enabled`
+  (`.wsp-gcount--on`, green) and `N Disabled` (`.wsp-gcount--off`, red). Whichever count is `0` also
+  gets `.wsp-gcount--zero`, which greys it out. `refreshCount()` rewrites both labels and the zero
+  class live as toggles change. Replaced the single `enabled / total` badge.
+- **Two-column layout (v2.6.7):** `.wsp-wrap` (max-width `1180px`) wraps a `.wsp-layout` flex row of
+  `.wsp-main` (settings, capped at `860px`) and `.wsp-side` (sticky promo cards). Collapses to one
+  column below `1100px`. See "Promo cards" below.
 - JS: write abilities show a `confirm()` dialog before enabling. "Toggle All" per group (its click is
   excluded from the accordion toggle via `e.target.closest('.wsp-toggle-all')`).
 - Saves to `wsp_mcp_abilities` option via Settings API (`wsp_mcp_settings_group`).
@@ -609,6 +616,28 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
   - **OpenClaw** — nested **`mcp.servers`** schema (not top-level `mcpServers`) + `mcp-remote` bridge, key inlined in the header (`~/.openclaw/openclaw.json`).
   - **OpenCode** — native remote HTTP under the **`mcp`** key: `mcp.<name>.{ type: "remote", url, enabled, oauth, headers: { Authorization: "Bearer <key>" } }`. Full-file snippet including `$schema` so users can create a fresh `~/.config/opencode/opencode.json`.
 - Self-contained tab/copy UI markup + JS.
+- **Copy buttons (v2.6.7):** `copyText()` uses `navigator.clipboard` only when `window.isSecureContext`
+  is true, else falls back to an off-screen `<textarea>` + `document.execCommand("copy")`. The
+  Clipboard API is undefined on plain-HTTP hosts (e.g. `http://*.local` dev sites), where the old
+  direct call threw synchronously and the buttons silently did nothing.
+- Same `.wsp-layout` / `.wsp-main` / `.wsp-side` two-column shell as the Settings page (v2.6.7).
+
+### Promo cards — `promo-cards.php` (v2.6.7)
+
+Shared by **both** admin pages; loaded before them in the main plugin file so the functions exist.
+
+- `wsp_mcp_promo_url( $url, $content, $campaign )` — appends UTM params for Google Analytics:
+  `utm_source=wsp_mcp_plugin`, `utm_medium=plugin_admin`, `utm_campaign=<screen>`,
+  `utm_content=<card>`, `utm_term=WSP_MCP_VERSION` (doubles as version-adoption tracking).
+- `wsp_mcp_promo_css()` — returns the `.wsp-layout` / `.wsp-side` / `.wsp-promo` CSS, concatenated
+  onto each page's own inline stylesheet (both pages call `wp_add_inline_style('common', …)`).
+- `wsp_mcp_render_promo_cards( $campaign )` — echoes the `.wsp-side` column: **Video Tutorials**
+  (`/tutorials`) and **170+ Tools Available** (`/abilities-directory`), both on freewordpressmcp.com.
+- Campaigns in use: `abilities_page` (settings-page.php), `connection_page` (connection-page.php).
+- Links use `target="_blank" rel="noopener"` — **not** `noreferrer`, which would strip the referrer
+  and break GA attribution on our own destination site. URLs pass through `esc_url()`.
+- **Adding a card:** edit `wsp_mcp_render_promo_cards()` only — never duplicate markup into a page.
+  `.wsp-promo + .wsp-promo` handles spacing automatically.
 
 > **Removed in v2.2:** the old **MCP > Config Files** page (`config-page.php`) that generated
 > mcp-adapter / `@automattic/mcp-wordpress-remote` snippets is gone. `wsp_mcp_redirect_legacy_config_page()`

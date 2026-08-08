@@ -32,7 +32,7 @@ add_action( 'admin_menu', 'wsp_mcp_add_connection_menu', 20 );
 function wsp_mcp_enqueue_connection_assets() {
 	add_action( 'admin_enqueue_scripts', function() {
 		$custom_css = '
-			.wsp-wrap{max-width:860px;margin:24px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+			.wsp-wrap{max-width:1180px;margin:24px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 			.wsp-header h1{margin:0 0 6px;font-size:22px;font-weight:700;color:#1d2327}
 			.wsp-desc{color:#646970;margin:0 0 20px;font-size:13.5px;line-height:1.65}
 			.wsp-facts{background:#fff;border:1px solid #dcdcde;border-radius:8px;padding:4px 20px;margin-bottom:24px}
@@ -58,7 +58,7 @@ function wsp_mcp_enqueue_connection_assets() {
 			.wsp-code-area{background:#1e1e1e;color:#d4d4d4;padding:20px;margin:0;font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.6;overflow-x:auto;white-space:pre}
 			.wsp-badge{display:inline-block;background:#edf6ff;color:#0073aa;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:middle}
 			.wsp-badge-node{background:#fff4e5;color:#996800}
-		';
+		' . wsp_mcp_promo_css();
 		wp_add_inline_style( 'common', $custom_css );
 
 		$custom_js = '
@@ -72,12 +72,36 @@ function wsp_mcp_enqueue_connection_assets() {
 					});
 				});
 
+				/**
+				 * navigator.clipboard only exists in a secure context (HTTPS or localhost),
+				 * so plain-HTTP local dev hosts fall back to a hidden textarea + execCommand.
+				 */
+				function copyText(text) {
+					if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+						return navigator.clipboard.writeText(text);
+					}
+					return new Promise(function(resolve, reject) {
+						var ta = document.createElement("textarea");
+						ta.value = text;
+						ta.setAttribute("readonly", "");
+						ta.style.position = "fixed";
+						ta.style.top = "-9999px";
+						document.body.appendChild(ta);
+						ta.select();
+						ta.setSelectionRange(0, ta.value.length);
+						var ok = false;
+						try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+						document.body.removeChild(ta);
+						ok ? resolve() : reject();
+					});
+				}
+
 				function makeCopyBtn(btnId, codeId) {
 					var btn  = document.getElementById(btnId);
 					var code = document.getElementById(codeId);
 					if (!btn || !code) return;
 					btn.addEventListener("click", function() {
-						navigator.clipboard.writeText(code.innerText).then(function() {
+						copyText(code.innerText).then(function() {
 							var orig = btn.innerHTML;
 							btn.innerHTML = \'<span class="dashicons dashicons-yes-alt" style="font-size:16px;width:16px;height:16px;"></span> Copied!\';
 							btn.style.color = "#00a32a";
@@ -204,6 +228,8 @@ function wsp_mcp_connection_page() {
 	);
 	?>
 	<div class="wsp-wrap">
+	  <div class="wsp-layout">
+		<div class="wsp-main">
 		<div class="wsp-header">
 			<h1><?php esc_html_e( 'MCP Connection', 'wsp-mcp-ai-agents-connector' ); ?></h1>
 		</div>
@@ -368,6 +394,10 @@ function wsp_mcp_connection_page() {
 			<code style="background:#f0f0f1;padding:2px 5px;border-radius:4px;">Authorization: Bearer &lt;API Key&gt;</code>
 			<?php esc_html_e( 'header to the endpoint URL, or a WordPress Application Password via HTTP Basic auth.', 'wsp-mcp-ai-agents-connector' ); ?>
 		</p>
+		</div><!-- .wsp-main -->
+
+		<?php wsp_mcp_render_promo_cards( 'connection_page' ); ?>
+	  </div><!-- .wsp-layout -->
 	</div>
 	<?php
 }

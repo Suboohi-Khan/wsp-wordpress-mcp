@@ -44,7 +44,7 @@ function wsp_mcp_enqueue_settings_assets( $hook ) {
     }
 
     $custom_css = '
-        .wsp-wrap{max-width:860px;margin:30px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+        .wsp-wrap{max-width:1180px;margin:30px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
         .wsp-header{display:flex;align-items:center;gap:12px;margin-bottom:24px}
         .wsp-header h1{margin:0;font-size:22px;font-weight:700;color:#1d2327}
         .wsp-badge-ver{background:#0073aa;color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
@@ -63,8 +63,12 @@ function wsp_mcp_enqueue_settings_assets( $hook ) {
         .wsp-chev{display:inline-block;color:#787c82;font-size:11px;transition:transform .2s;width:10px}
         .wsp-group.wsp-open .wsp-chev{transform:rotate(90deg)}
         .wsp-gh-right{display:flex;align-items:center;gap:14px}
-        .wsp-gcount{font-size:11px;font-weight:700;color:#646970;background:#e8eaec;border-radius:20px;padding:2px 10px;letter-spacing:.3px}
-        .wsp-gcount.wsp-gcount--on{background:#e3f4e6;color:#00802b}
+        /* Per-group tally: enabled abilities in green, disabled in red; a zero count greys out. */
+        .wsp-gcounts{display:inline-flex;align-items:center;gap:6px}
+        .wsp-gcount{font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;letter-spacing:.3px;border:1px solid transparent;white-space:nowrap}
+        .wsp-gcount--on{background:#e3f4e6;color:#00802b;border-color:#b8e2c2}
+        .wsp-gcount--off{background:#fdeaea;color:#b32d2e;border-color:#f3c1c1}
+        .wsp-gcount.wsp-gcount--zero{background:#f0f0f1;color:#8c8f94;border-color:#dcdcde}
         .wsp-gbody{display:none}
         .wsp-group.wsp-open .wsp-gbody{display:block}
         .wsp-toggle-all{font-size:12px;color:#0073aa;cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;font-weight:600}
@@ -85,7 +89,7 @@ function wsp_mcp_enqueue_settings_assets( $hook ) {
         .wsp-savebar{display:flex;align-items:center;gap:16px;margin-top:24px;padding:18px 20px;background:#fff;border:1px solid #dcdcde;border-radius:8px}
         .wsp-savebar .button-primary{font-size:14px;padding:7px 20px;height:auto}
         .wsp-savenote{font-size:12px;color:#787c82}
-    ';
+    ' . wsp_mcp_promo_css();
     wp_add_inline_style( 'common', $custom_css );
 
     $custom_js = '
@@ -126,14 +130,20 @@ function wsp_mcp_enqueue_settings_assets( $hook ) {
                 });
             });
 
-            // Keep count badge in sync
+            // Keep the enabled/disabled tally in sync
             function refreshCount(g){
-                var badge = document.querySelector(\'.wsp-gcount[data-group="\' + g + \'"]\');
-                if (!badge) return;
+                var wrap = document.querySelector(\'.wsp-gcounts[data-group="\' + g + \'"]\');
+                if (!wrap) return;
                 var boxes = document.querySelectorAll(\'input[data-group="\' + g + \'"]\');
                 var on = Array.from(boxes).filter(function(b){ return b.checked; }).length;
-                badge.textContent = on + " / " + badge.dataset.total;
-                badge.classList.toggle("wsp-gcount--on", on > 0);
+                var off = boxes.length - on;
+
+                var onBadge  = wrap.querySelector(\'[data-role="on"]\');
+                var offBadge = wrap.querySelector(\'[data-role="off"]\');
+                onBadge.textContent  = on + " Enabled";
+                offBadge.textContent = off + " Disabled";
+                onBadge.classList.toggle("wsp-gcount--zero", on === 0);
+                offBadge.classList.toggle("wsp-gcount--zero", off === 0);
             }
 
             // Write confirmation
@@ -201,6 +211,8 @@ function wsp_mcp_settings_page() {
     }
     ?>
     <div class="wsp-wrap">
+      <div class="wsp-layout">
+        <div class="wsp-main">
         <div class="wsp-header">
             <h1>⚙️ WSP MCP Abilities</h1>
             <span class="wsp-badge-ver">v<?php echo esc_html( WSP_MCP_VERSION ); ?></span>
@@ -232,7 +244,11 @@ function wsp_mcp_settings_page() {
                 <div class="wsp-gh">
                     <h3 class="wsp-gt"><span class="wsp-chev">&#9654;</span><?php echo isset( $icons[ $gname ] ) ? esc_html( $icons[ $gname ] ) . ' ' : ''; ?><?php echo esc_html( $gname ); ?></h3>
                     <div class="wsp-gh-right">
-                        <span class="wsp-gcount<?php echo $g_on > 0 ? ' wsp-gcount--on' : ''; ?>" data-group="<?php echo esc_attr( $gname ); ?>" data-total="<?php echo esc_attr( $g_total ); ?>"><?php echo esc_html( $g_on . ' / ' . $g_total ); ?></span>
+                        <?php $g_off = $g_total - $g_on; ?>
+                        <span class="wsp-gcounts" data-group="<?php echo esc_attr( $gname ); ?>">
+                            <span class="wsp-gcount wsp-gcount--on<?php echo 0 === $g_on ? ' wsp-gcount--zero' : ''; ?>" data-role="on"><?php echo esc_html( $g_on ); ?> Enabled</span>
+                            <span class="wsp-gcount wsp-gcount--off<?php echo 0 === $g_off ? ' wsp-gcount--zero' : ''; ?>" data-role="off"><?php echo esc_html( $g_off ); ?> Disabled</span>
+                        </span>
                         <button type="button" class="wsp-toggle-all" data-group="<?php echo esc_attr( $gname ); ?>">Toggle All</button>
                     </div>
                 </div>
@@ -266,6 +282,10 @@ function wsp_mcp_settings_page() {
                 <span class="wsp-savenote">Changes take effect immediately for all active MCP sessions.</span>
             </div>
         </form>
+        </div><!-- .wsp-main -->
+
+        <?php wsp_mcp_render_promo_cards( 'abilities_page' ); ?>
+      </div><!-- .wsp-layout -->
     </div>
     <?php
 }

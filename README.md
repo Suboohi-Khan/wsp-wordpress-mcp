@@ -2,7 +2,7 @@
 
 > **By [WebSensePro](https://websensepro.com) — Official Shopify Partner & WordPress Agency**
 
-[![Version](https://img.shields.io/badge/Version-2.6.5-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
+[![Version](https://img.shields.io/badge/Version-2.6.7-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
 [![YouTube](https://img.shields.io/badge/YouTube-140K%2B%20Subscribers-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/websensepro)
 [![License](https://img.shields.io/badge/License-GPL%202.0-green?style=for-the-badge)](LICENSE)
 
@@ -14,6 +14,12 @@
 
 ---
 
+## ✨ What's New in v2.6.7
+
+- 🐛 **Copy buttons fixed on plain-HTTP sites** — the **Copy** button on every snippet tab in **MCP > Connection** did nothing on sites not served over HTTPS (typically local dev hosts like `http://mysite.local/`). The browser Clipboard API is only available in a *secure context* — HTTPS or `localhost` — so on any other hostname it was missing entirely and the click failed silently. Copying now falls back to a hidden textarea when the Clipboard API is unavailable. All six client tabs are fixed.
+- 🟢 **Enabled/disabled tally per group** — each ability group header now shows a green **"N Enabled"** pill next to a red **"N Disabled"** pill, replacing the single `enabled / total` badge that looked the same whether a group was partly or fully on. Counts update live as you flip switches or use **Toggle All**.
+- 🎬 **Tutorials & directory links in the admin** — **MCP > Settings** and **MCP > Connection** now carry sidebar cards linking to our [video tutorials](https://freewordpressmcp.com/tutorials) and the full [abilities directory](https://freewordpressmcp.com/abilities-directory).
+- 🔒 **Verified against WordPress 7.0.3** — no plugin changes were needed. The `kses` (CSS injection) and HTTP URL-validation (SSRF) fixes in that security release are inherited automatically, because this plugin calls the core APIs rather than reimplementing them. Since this plugin exposes tools to AI agents, we recommend running **WordPress 7.0.3 or 6.9.6+** so those fixes are in place.
 
 ## ✨ What's New in v2.6.6
 
@@ -88,7 +94,7 @@ New: Direct file upload for media. wsp_upload_media (Upload Media) now accepts b
 - 🗂️ **Modular Plugin Architecture** — refactored into `includes/` with separate files per feature group
 - 🔧 **Auto Config Generator** — generates ready-to-paste configs for Claude Desktop & Codex from wp-admin
 - 🔒 **Granular Ability Controls** — enable/disable each ability individually; Elementor group only shown when Elementor is active
-- 📦 **WP.org Ready** — proper headers, license, `uninstall.php`, and PHP 7.2+ support
+- 📦 **WP.org Ready** — proper headers, license, `uninstall.php`, and PHP 7.4+ support
 
 ---
 
@@ -193,7 +199,7 @@ New: Direct file upload for media. wsp_upload_media (Upload Media) now accepts b
 
 ## 🚀 Quick Start
 
-**Prerequisites:** WordPress 6.2+, PHP 7.4+ — **that's it.** No companion plugin, no MCP Adapter, no Node.js for natively-supported clients (Cursor, Codex, Antigravity). Claude Desktop & OpenClaw use the `mcp-remote` bridge, which needs Node.js 18+.
+**Prerequisites:** WordPress 6.9+ (7.0.3 or 6.9.6+ recommended — see v2.6.7 notes), PHP 7.4+ — **that's it.** No companion plugin, no MCP Adapter, no Node.js for natively-supported clients (Cursor, Codex, Antigravity). Claude Desktop & OpenClaw use the `mcp-remote` bridge, which needs Node.js 18+.
 
 1. Install & activate this plugin
 2. Go to **MCP > Settings** in wp-admin and enable the abilities you need
