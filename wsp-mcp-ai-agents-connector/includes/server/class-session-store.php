@@ -64,6 +64,14 @@ class WSP_MCP_Session_Store {
 	/**
 	 * Validate a session and slide its expiry forward.
 	 *
+	 * MySQL/MariaDB report *changed* rows, not *matched* rows, so an UPDATE that
+	 * writes the value already stored returns 0. Both creation and sliding use
+	 * second-resolution timestamps, so a request arriving in the same second as
+	 * `initialize` (exactly what Claude Desktop / mcp-remote does when it fires
+	 * `tools/list` straight after) computes an identical `expires_at` and gets 0
+	 * back — which previously read as "session not found". A 0 result is
+	 * therefore ambiguous and must be resolved with an explicit existence check.
+	 *
 	 * @param string $session_id Session identifier.
 	 * @return bool True if the session exists and has not expired.
 	 */
@@ -79,7 +87,25 @@ class WSP_MCP_Session_Store {
 			$session_id,
 			current_time( 'mysql', true )
 		) );
-		return (bool) $updated;
+
+		if ( false === $updated ) {
+			return false; // Database error — do not guess.
+		}
+		if ( 0 < $updated ) {
+			return true;
+		}
+
+		// 0 changed rows: either the row is missing/expired, or the expiry we just
+		// wrote is byte-identical to the stored one. Only a read can tell them apart.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$exists = $wpdb->get_var( $wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is built from $wpdb->prefix (no user input); values are bound via prepare().
+			"SELECT 1 FROM {$table} WHERE session_id = %s AND expires_at > %s",
+			$session_id,
+			current_time( 'mysql', true )
+		) );
+
+		return '1' === (string) $exists;
 	}
 
 	/**

@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.0.3
 Requires PHP: 7.4
-Stable tag: 2.6.7
+Stable tag: 2.6.8
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -144,6 +144,9 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.6.8 =
+* Fixed: "Session not found or expired. Re-initialize." on the very first request after `initialize`. Clients that send `tools/list` immediately (Claude Desktop via mcp-remote, and any fast script) landed in the same second as the `initialize` that created the session, so the expiry-sliding UPDATE wrote the value already stored and MySQL/MariaDB reported 0 changed rows — which the plugin read as a missing session. A zero-row update is now confirmed with an existence check before the session is rejected. Adding a delay before the second request is no longer necessary. Fixes GitHub #30.
 
 = 2.6.7 =
 * Fixed: The "Copy" buttons on the MCP > Connection page did nothing on sites served over plain HTTP (such as local development hosts). The browser Clipboard API is only available in a secure context (HTTPS or localhost), so the copy now falls back to a hidden textarea when it is unavailable. All six client tabs are fixed.

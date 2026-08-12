@@ -31,7 +31,7 @@ These three files give you complete project understanding without touching the c
 ## What this plugin is
 
 **Plugin Name:** WSP MCP - AI Agents Connector  
-**Version:** 2.6.6
+**Version:** 2.6.8
 **Slug/prefix:** `wsp`  
 **WP option key:** `wsp_mcp_abilities`  
 **Constant prefix:** `WSP_MCP_`
@@ -59,7 +59,10 @@ client's `protocolVersion` if recognized; supported = `2024-11-05`/`2025-03-26`/
   Booted on `plugins_loaded` via `WSP_MCP_Server::init()`.
 - `class-session-store.php` — `WSP_MCP_Session_Store`: DB table `{prefix}wsp_mcp_sessions`,
   `Mcp-Session-Id` issued on `initialize`, fingerprint-bound, sliding 24h expiry, daily cron
-  `wsp_mcp_session_cleanup`.
+  `wsp_mcp_session_cleanup`. **`touch_session()` must never treat a 0-row UPDATE as "no session"**
+  (v2.6.8): expiry is second-resolution, so a request in the same second as `initialize` rewrites
+  the identical `expires_at` and MySQL reports 0 *changed* rows. `false` = DB error → reject,
+  `> 0` → accept, `0` → ambiguous, resolved with a `SELECT 1 … expires_at > NOW` existence check.
 - `class-auth.php` — `WSP_MCP_Auth`: accepts **(1)** Application Password (HTTP Basic, validated
   by WP core), **(2)** plugin API key via `Authorization: Bearer <key>`, **(3)** same key via
   `X-WSP-MCP-API-Key`. API key stored in option `wsp_mcp_api_key` (admin-only → mapped to lowest-ID

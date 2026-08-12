@@ -8,6 +8,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.6.8] — 2026-08-12
+
+### Fixed — `tools/list` straight after `initialize` rejected as an unknown session (`includes/server/class-session-store.php`)
+- **Every request that arrived in the same wall-clock second as `initialize` failed with `Session not found or expired. Re-initialize.` (JSON-RPC `-32600`, HTTP 404).** Claude Desktop via `mcp-remote` hit this consistently because it fires `tools/list` milliseconds after the handshake; reporters saw 0/10 success at zero delay and 10/10 with a 2-second delay, which made it look like replication lag on remote-DB hosting.
+- **Root cause is affected-row semantics, not visibility.** `touch_session()` slides the expiry with `UPDATE … SET expires_at = %s WHERE session_id = %s AND expires_at > %s` and returned `(bool) $updated`. `create_session()` and `touch_session()` both compute `expires_at` as `gmdate( 'Y-m-d H:i:s', time() + TTL )` — second resolution — so a touch within the same second as creation writes a byte-identical value. MySQL/MariaDB report **changed** rows, not **matched** rows, so the query returns `0`, which cast to `false`. The row existed and was unexpired the whole time. Below-one-second timing is why the failure looked random.
+- **Fix:** `false` (a real DB error) still returns `false` and `> 0` still returns `true`, but `0` is now treated as ambiguous and resolved with `SELECT 1 FROM … WHERE session_id = %s AND expires_at > %s`. Missing and expired sessions are still rejected; only the no-op timestamp write is now accepted. No schema change, no TTL change, no behaviour change for clients that already worked.
+- Diagnosis and the patch shape came from @WikiZell in GitHub #30, verified on WordPress 7.0.3 / PHP 8.3 / MariaDB.
+
+---
+
 ## [2.6.7] — 2026-08-08
 
 ### Fixed — Copy buttons dead on plain-HTTP sites (`includes/admin/connection-page.php`)
