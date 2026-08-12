@@ -2,7 +2,7 @@
 
 > **By [WebSensePro](https://websensepro.com) — Official Shopify Partner & WordPress Agency**
 
-[![Version](https://img.shields.io/badge/Version-2.6.7-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
+[![Version](https://img.shields.io/badge/Version-2.6.8-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
 [![YouTube](https://img.shields.io/badge/YouTube-140K%2B%20Subscribers-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/websensepro)
 [![License](https://img.shields.io/badge/License-GPL%202.0-green?style=for-the-badge)](LICENSE)
 
@@ -13,6 +13,10 @@
 [![WSP WordPress MCP — Full Tutorial](https://img.youtube.com/vi/1hGSUAdRxiU/maxresdefault.jpg)](https://youtu.be/1hGSUAdRxiU)
 
 ---
+
+## ✨ What's New in v2.6.8
+
+- 🐛 **"Session not found or expired" on the very first request — fixed** — clients that send `tools/list` immediately after `initialize` (Claude Desktop via `mcp-remote`, and any fast script) were rejected with `Session not found or expired. Re-initialize.` The connection looked healthy, tools appeared to load, and then every command timed out. Inserting a 2-second pause made it work, which pointed at slow or remote database hosting — but that was a red herring. The session row was always there: sessions store their expiry to the second, so a request landing in the *same second* as `initialize` rewrote an identical expiry timestamp, and MySQL/MariaDB report **changed** rows rather than **matched** rows — returning `0`, which the plugin read as "no such session." A zero-row update is now confirmed with an existence check before any session is rejected. Missing and expired sessions are still rejected exactly as before. No delay, workaround, or client-side change needed. Fixes [#30](https://github.com/bilalnaseer/wsp-wordpress-mcp/issues/30) — with thanks to [@WikiZell](https://github.com/WikiZell) for isolating the cause and testing the patch.
 
 ## ✨ What's New in v2.6.7
 
