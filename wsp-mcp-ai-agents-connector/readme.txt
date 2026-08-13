@@ -2,7 +2,7 @@
 Contributors: bilalnaseer
 Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
-Tested up to: 7.0.3
+Tested up to: 7.1
 Requires PHP: 7.4
 Stable tag: 2.6.8
 License: GPL-2.0-or-later
