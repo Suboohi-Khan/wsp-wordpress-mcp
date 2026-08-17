@@ -199,35 +199,29 @@ class WSP_MCP_Server {
 
 		$enabled = self::enabled_tools();
 		if ( ! isset( $enabled[ $name ] ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, 'Unknown or disabled tool.' );
 			return self::rpc_error( $id, -32602, 'Unknown or disabled tool: ' . $name, 200 );
 		}
 		$spec = $enabled[ $name ];
 
 		$cap = WSP_MCP_Auth::require_cap( $spec['capability'] );
 		if ( is_wp_error( $cap ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_DENIED, $cap->get_error_message() );
 			return self::tool_text( $id, 'Error: ' . $cap->get_error_message(), true );
 		}
 
 		if ( ! is_callable( $spec['callback'] ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, 'Tool has no handler.' );
 			return self::tool_text( $id, 'Error: tool has no handler.', true );
 		}
 
 		try {
 			$result = call_user_func( $spec['callback'], $args );
 		} catch ( \Throwable $e ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, $e->getMessage() );
 			return self::tool_text( $id, 'Error: ' . $e->getMessage(), true );
 		}
 
 		if ( is_wp_error( $result ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, $result->get_error_message() );
 			return self::tool_text( $id, 'Error: ' . $result->get_error_message(), true );
 		}
 
-		WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_SUCCESS );
 		return self::tool_text( $id, wp_json_encode( $result, JSON_PRETTY_PRINT ), false );
 	}
 

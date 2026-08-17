@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WSP MCP - AI Agents Connector
  * Description: Exposes WordPress content to Claude AI and other AI Agents via a built-in MCP server (no companion plugin required). Manage all abilities from Settings > MCP.
- * Version: 2.7.0
+ * Version: 2.6.8
  * Requires at least: 6.9
  * Requires PHP: 7.4
  * Author: WebSensePro
@@ -14,7 +14,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'WSP_MCP_VERSION', '2.7.0' );
+define( 'WSP_MCP_VERSION', '2.6.8' );
 define( 'WSP_MCP_OPTION', 'wsp_mcp_abilities' );
 define( 'WSP_MCP_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -23,9 +23,7 @@ require_once WSP_MCP_DIR . 'includes/registry.php';
 require_once WSP_MCP_DIR . 'includes/admin/promo-cards.php';
 require_once WSP_MCP_DIR . 'includes/admin/settings-page.php';
 require_once WSP_MCP_DIR . 'includes/admin/connection-page.php';
-require_once WSP_MCP_DIR . 'includes/admin/audit-log-page.php';
 // Native MCP server (v2.0).
-require_once WSP_MCP_DIR . 'includes/audit/class-audit-log.php';
 require_once WSP_MCP_DIR . 'includes/server/class-session-store.php';
 require_once WSP_MCP_DIR . 'includes/server/class-auth.php';
 require_once WSP_MCP_DIR . 'includes/server/class-mcp-server.php';
@@ -56,7 +54,6 @@ add_action( 'admin_init',                       'wsp_mcp_register_settings' );
 add_action( 'plugins_loaded', array( 'WSP_MCP_Server', 'init' ) );
 add_action( 'plugins_loaded', 'wsp_mcp_maybe_upgrade_db' );
 add_action( 'wsp_mcp_session_cleanup', array( 'WSP_MCP_Session_Store', 'cleanup_expired' ) );
-add_action( 'wsp_mcp_audit_log_cleanup', array( 'WSP_MCP_Audit_Log', 'cleanup_old_entries' ) );
 
 register_activation_hook( __FILE__, 'wsp_mcp_activate' );
 register_deactivation_hook( __FILE__, 'wsp_mcp_deactivate' );
@@ -64,13 +61,9 @@ register_deactivation_hook( __FILE__, 'wsp_mcp_deactivate' );
 /** Activation: create tables, ensure an API key, schedule cleanup. */
 function wsp_mcp_activate() {
     WSP_MCP_Session_Store::create_table();
-    WSP_MCP_Audit_Log::create_table();
     WSP_MCP_Auth::get_api_key();
     if ( ! wp_next_scheduled( 'wsp_mcp_session_cleanup' ) ) {
         wp_schedule_event( time(), 'daily', 'wsp_mcp_session_cleanup' );
-    }
-    if ( ! wp_next_scheduled( 'wsp_mcp_audit_log_cleanup' ) ) {
-        wp_schedule_event( time(), 'daily', 'wsp_mcp_audit_log_cleanup' );
     }
     update_option( 'wsp_mcp_db_version', WSP_MCP_VERSION, false );
 }
@@ -78,25 +71,19 @@ function wsp_mcp_activate() {
 /** Deactivation: unschedule cleanup. Data is preserved for reactivation. */
 function wsp_mcp_deactivate() {
     wp_clear_scheduled_hook( 'wsp_mcp_session_cleanup' );
-    wp_clear_scheduled_hook( 'wsp_mcp_audit_log_cleanup' );
 }
 
 /**
  * Heal installs upgraded via the Plugins screen, where the activation hook
- * never fires. Creates the sessions/audit-log tables on first load after an
- * update.
+ * never fires. Creates the sessions table on first load after an update.
  */
 function wsp_mcp_maybe_upgrade_db() {
     if ( get_option( 'wsp_mcp_db_version' ) === WSP_MCP_VERSION ) {
         return;
     }
     WSP_MCP_Session_Store::create_table();
-    WSP_MCP_Audit_Log::create_table();
     if ( ! wp_next_scheduled( 'wsp_mcp_session_cleanup' ) ) {
         wp_schedule_event( time(), 'daily', 'wsp_mcp_session_cleanup' );
-    }
-    if ( ! wp_next_scheduled( 'wsp_mcp_audit_log_cleanup' ) ) {
-        wp_schedule_event( time(), 'daily', 'wsp_mcp_audit_log_cleanup' );
     }
     update_option( 'wsp_mcp_db_version', WSP_MCP_VERSION, false );
 }
