@@ -2,7 +2,7 @@
 
 > **By [WebSensePro](https://websensepro.com) — Official Shopify Partner & WordPress Agency**
 
-[![Version](https://img.shields.io/badge/Version-2.6.8-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
+[![Version](https://img.shields.io/badge/Version-2.7.0-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
 [![YouTube](https://img.shields.io/badge/YouTube-140K%2B%20Subscribers-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/websensepro)
 [![License](https://img.shields.io/badge/License-GPL%202.0-green?style=for-the-badge)](LICENSE)
 
@@ -13,6 +13,12 @@
 [![WSP WordPress MCP — Full Tutorial](https://img.youtube.com/vi/1hGSUAdRxiU/maxresdefault.jpg)](https://youtu.be/1hGSUAdRxiU)
 
 ---
+
+## ✨ What's New in v2.7.0
+
+- 🧾 **Full Audit Log** — every MCP `tools/call` request is now recorded in a dedicated, self-hosted table (`wp_wsp_mcp_audit_log`): tool name, timestamp (UTC), acting user (or *unauthenticated*), request IP, and the outcome — **success**, **denied**, or **error** — with a short message for failures. Nothing leaves your server: no external API, no third-party service, no paid dependency. Only the direct connection (`REMOTE_ADDR`) is logged, since proxy headers like `X-Forwarded-For` are attacker-controlled and could be used to frame another address. Logging can never break a tool call — a write failure is swallowed silently.
+- 🗂️ **MCP > Audit Log admin page** — browse the trail newest-first, filter by status or tool name, page through it, and clear it in one click. Restricted to administrators (`manage_options`), like every other MCP screen.
+- 🧹 **Automatic pruning** — a daily cron task (`wsp_mcp_audit_log_cleanup`) deletes entries older than **90 days**, so the table stays small. Change the window with the `wsp_mcp_audit_log_retention_days` filter. The table is created on activation *and* on the first load after a Plugins-screen update, and is dropped on uninstall.
 
 ## ✨ What's New in v2.6.8
 
@@ -210,6 +216,7 @@ New: Direct file upload for media. wsp_upload_media (Upload Media) now accepts b
 3. Go to **MCP > Connection** and pick your client tab (Claude Desktop, Cursor, Codex, Antigravity, or OpenClaw)
 4. Copy the snippet — the endpoint URL and API key are already filled in — and paste it into your client's config
 5. Reconnect / restart the client and start prompting your AI agent
+6. Review what your agent actually did under **MCP > Audit Log**
 
 > **Upgrading from before v2.0?** As of v2.2 the legacy MCP-Adapter / Abilities-API path and the **MCP > Config Files** page have been removed. Re-create your connection using the native endpoint on **MCP > Connection**.
 
