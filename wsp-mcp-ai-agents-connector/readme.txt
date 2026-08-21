@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.6.8
+Stable tag: 2.7.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,7 @@ https://youtu.be/1hGSUAdRxiU
 * Per-ability on/off toggles in **MCP > Settings**; write abilities are off by default.
 * Two authentication methods: WordPress Application Passwords (HTTP Basic) or a plugin-generated API key (`Authorization: Bearer` or `X-WSP-MCP-API-Key`).
 * Capability checks on every tool — an AI client can only do what its authenticated user can do.
+* Full Audit Log in **MCP > Audit Log**: every tool call is recorded (tool name, time, user, IP, success/denied/error) in your own database — self-hosted, no external service, visible to administrators only.
 * Optional Yoast SEO and Elementor tools, shown only when those plugins are active.
  
 = Complete tools list =
@@ -144,6 +145,11 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.7.0 =
+* New: Full Audit Log. Every MCP `tools/call` request is now recorded in a dedicated, self-hosted database table (`wp_wsp_mcp_audit_log`) — tool name, timestamp, acting user, request IP, and outcome (success, denied, or error). No external API or paid service is involved.
+* New: **MCP > Audit Log** admin page to browse, filter (by status or tool), and clear the log. Restricted to administrators (`manage_options`), matching every other MCP admin screen.
+* New: Log entries older than 90 days (filterable via `wsp_mcp_audit_log_retention_days`) are pruned automatically by a daily cron task, so the table stays lightweight.
 
 = 2.6.8 =
 * Fixed: "Session not found or expired. Re-initialize." on the very first request after `initialize`. Clients that send `tools/list` immediately (Claude Desktop via mcp-remote, and any fast script) landed in the same second as the `initialize` that created the session, so the expiry-sliding UPDATE wrote the value already stored and MySQL/MariaDB reported 0 changed rows — which the plugin read as a missing session. A zero-row update is now confirmed with an existence check before the session is rejected. Adding a delay before the second request is no longer necessary. Fixes GitHub #30.
