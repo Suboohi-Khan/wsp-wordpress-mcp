@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.7.0
+Stable tag: 2.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,7 @@ https://youtu.be/1hGSUAdRxiU
 * Two authentication methods: WordPress Application Passwords (HTTP Basic) or a plugin-generated API key (`Authorization: Bearer` or `X-WSP-MCP-API-Key`).
 * Capability checks on every tool — an AI client can only do what its authenticated user can do.
 * Full Audit Log in **MCP > Audit Log**: every tool call is recorded (tool name, time, user, IP, success/denied/error) in your own database — self-hosted, no external service, visible to administrators only.
+* Analytics & Performance Dashboard in **MCP > Analytics**: total requests, most-used tool, average response time, and error rate at a glance, plus a per-category usage breakdown and a recent-requests performance log — all computed from your own database.
 * Optional Yoast SEO and Elementor tools, shown only when those plugins are active.
  
 = Complete tools list =
@@ -145,6 +146,9 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.8.0 =
+* New: Analytics & Performance Dashboard in **MCP > Analytics** — summary cards for total requests, most-used tool, average response time, and error rate; a per-category tool-usage breakdown with lightweight CSS progress bars; and a recent-requests performance log. Built entirely on the existing Audit Log database (`wp_wsp_mcp_audit_log`), which now also records each request's ability category and execution duration in milliseconds — no external service involved. Restricted to administrators (`manage_options`).
 
 = 2.7.0 =
 * New: Full Audit Log. Every MCP `tools/call` request is now recorded in a dedicated, self-hosted database table (`wp_wsp_mcp_audit_log`) — tool name, timestamp, acting user, request IP, and outcome (success, denied, or error). No external API or paid service is involved.
