@@ -8,6 +8,83 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.11.0] — 2026-09-02
+
+### New — "Claude Connectors" tab on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **Zero-config-file connection path**, now the default first tab (`data-tab="claudeweb"`, replacing
+  the old default-active state on the classic Claude Desktop tab). Claude's own **Customize >
+  Connectors > Add custom connector** screen — a different product surface from the
+  `claude_desktop_config.json` file, shared across claude.ai, Claude Desktop, and Claude mobile —
+  accepts a bare **Remote MCP server URL** plus a **Request header** (`static_headers`, beta) instead
+  of an OAuth flow or a locally-edited JSON file. This tab surfaces exactly the two values that
+  screen needs: `#wsp-code-ccurl` (the endpoint, same `$endpoint` used everywhere else on this page)
+  and `#wsp-code-ccheader` (`Bearer <api_key>`, ready to paste as the `Authorization` header value),
+  each with its own `makeCopyBtn()`-wired Copy button. No PHP/JS logic changed elsewhere — this is
+  additive markup only, reusing existing helpers.
+- **Two hard constraints called out directly on the tab**, since neither is something this plugin
+  can fix: (1) Claude's servers connect from Anthropic's cloud infrastructure, not the user's
+  machine, so the site must be reachable on the public internet — `localhost` / private-network
+  installs cannot use this path and still need the config-file tab. (2) The Request-headers field is
+  a beta Anthropic is rolling out gradually per-organization; accounts that don't have it yet won't
+  see the field in their Add-custom-connector dialog and should use the (now second, no-longer-
+  default) **Claude Desktop (config file)** tab instead.
+- The old Claude Desktop tab is unchanged in content — only its `id`/button label and default-active
+  state moved (`wsp-tab-active` / `wsp-tab-panel-active` now live on `claudeweb`, not `claude`).
+- No server-side auth capability changed: this exposes the **existing** Bearer-API-key mechanism
+  through a different Claude UI, it does not add OAuth. See the "OAuth: Coming soon" note already on
+  the Configuration Generator (v2.9.0) for why a true zero-copy, zero-beta path would require a real
+  OAuth 2.1 authorization server implementation — out of scope here.
+- Source verified against Anthropic's own docs at time of writing: `/docs/connectors/custom/remote-
+  mcp#authenticating-with-request-headers` and `/docs/connectors/building/authentication`.
+
+---
+
+## [2.10.0] — 2026-09-02
+
+### New — One-Click Automated Connector on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **Download button on every snippet** (all six static tabs plus the live generator): each
+  `.wsp-config-header` now holds a `.wsp-config-actions` pair — **Download** next to the existing
+  **Copy**. A new client-side `downloadFile(filename, content)` helper builds a throwaway `Blob` +
+  `<a download>` and clicks it, so one click writes the exact file (`claude_desktop_config.json`,
+  `mcp.json`, `config.toml`, `mcp_config.json`, `openclaw.json`, `opencode.json`) straight to disk —
+  nothing to select, nothing to paste. The generator's download button derives its filename live
+  from the currently-rendered snippet (`snip.filename.split("/").pop()`), so it always matches
+  whichever tool/auth combination is on screen.
+- **True one-click connect for Cursor**: Cursor supports a documented deep link,
+  `cursor://anysphere.cursor-deeplink/mcp/install?name=<slug>&config=<base64-of-{url,headers}>`
+  (https://cursor.com/docs/mcp/install-links), that opens Cursor directly and lets *it* write
+  `~/.cursor/mcp.json` — no config file to open or paste into at all. A new `.wsp-connect-callout` /
+  `.wsp-connect-btn` box surfaces this both on the static **Cursor** tab (link built server-side in
+  PHP from the already-known API key) and in the live generator (link rebuilt client-side on every
+  `render()`, shown only once a real Bearer or Basic auth header is available — i.e. immediately for
+  API Key, or once both Application Password fields are filled in).
+  - Caught and fixed during implementation: WordPress's `esc_url()` strips any URL protocol that
+    isn't in its default `wp_allowed_protocols()` list, which does not include `cursor` — echoing the
+    deep link through bare `esc_url()` would have silently mangled the scheme and left the button
+    dead. Fixed by passing the protocol explicitly: `esc_url( $cursor_deeplink, array( 'cursor',
+    'https', 'http' ) )`.
+  - No equivalent deep link exists yet for Claude Desktop, Codex, Antigravity, OpenClaw, or
+    OpenCode — none of them publish a documented one-click MCP-install protocol handler, so only
+    Cursor gets the connect button; the other five keep Download + Copy.
+- Purely additive: existing Copy-button behavior, tab switching, and the Configuration Generator's
+  snippet output (v2.9.0) are unchanged.
+- `AGENTS.md` "Connection page" section documents the new element IDs, JS helpers, and the
+  `esc_url()` protocol-allowlist gotcha for future agents.
+
+---
+
+## [2.9.0] — 2026-09-01
+
+### New — Live Configuration Generator on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **A new `.wsp-gen-box` section** sits above the existing six static per-client tabs: pick an **AI Tool** (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) from a `<select>`, and an **Authentication Method** from a 3-way pill group (**API Key**, **Application Password**, **OAuth**). The output snippet re-renders live, entirely client-side, on every change — no page reload, no server round trip — with its own "Copy" button reusing the page's existing `copyText()` clipboard helper.
+- **API Key** (default, marked Recommended) reuses the same Bearer-token construction as the static tabs below it.
+- **Application Password** reveals a WordPress-Username + Application-Password input pair. Neither value is ever submitted to the server: the `Authorization: Basic <base64>` token is computed in the browser with `btoa()` and embedded literally into the generated snippet, the same way the API-key path already embeds its own secret directly (no `${VAR}` env interpolation, avoiding the known mcp-remote "missing env var" failure mode). For **Claude Desktop** specifically, the generated config's `env` block also lists `WP_API_URL` / `WP_API_USERNAME` / `WP_API_PASSWORD` as a human-readable record of the credential — these three keys are informational only; the actual transport is still the `mcp-remote` bridge to this plugin's own native `wsp-mcp/v1/mcp` endpoint, **not** a reintroduction of the `@automattic/mcp-wordpress-remote` package removed in v2.2 (see `[2.2.0]` below).
+- **OAuth** is shown as a selectable method — matching what modern MCP client pickers expose — but is **not implemented server-side** (`class-auth.php` has no OAuth flow). Selecting it swaps the code preview for a "coming soon" notice and disables the copy button, rather than generating a config that would silently fail to authenticate.
+- A conditional HTTPS notice appears under the Application Password fields only when the current admin page itself is served over plain HTTP on a non-local host, since WordPress core itself refuses to let such a site create Application Passwords.
+- `readme.txt` "Key features" and changelog updated; `AGENTS.md` "Connection page" section documents the new markup/JS contract for future agents.
+
+---
+
 ## [2.6.8] — 2026-08-12
 
 ### Fixed — `tools/list` straight after `initialize` rejected as an unknown session (`includes/server/class-session-store.php`)

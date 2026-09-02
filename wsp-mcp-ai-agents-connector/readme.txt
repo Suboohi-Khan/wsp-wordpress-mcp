@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.8.0
+Stable tag: 2.11.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -27,6 +27,8 @@ https://youtu.be/1hGSUAdRxiU
 * Built-in MCP server over a single REST endpoint (Streamable HTTP, JSON-RPC 2.0) — no external dependency.
 * Per-ability on/off toggles in **MCP > Settings**; write abilities are off by default.
 * Two authentication methods: WordPress Application Passwords (HTTP Basic) or a plugin-generated API key (`Authorization: Bearer` or `X-WSP-MCP-API-Key`).
+* Live Configuration Generator on **MCP > Connection**: choose your AI tool and authentication method and get a ready-to-paste, correctly-formatted config snippet with a one-click copy button — nothing you type is sent to the server.
+* One-click automated connector on **MCP > Connection**: a **Download** button next to every snippet saves the exact config file with no copy-paste needed, and Cursor users get a **Connect Cursor Automatically** button that opens Cursor directly and adds the server for them — no config file to touch at all.
 * Capability checks on every tool — an AI client can only do what its authenticated user can do.
 * Full Audit Log in **MCP > Audit Log**: every tool call is recorded (tool name, time, user, IP, success/denied/error) in your own database — self-hosted, no external service, visible to administrators only.
 * Analytics & Performance Dashboard in **MCP > Analytics**: total requests, most-used tool, average response time, and error rate at a glance, plus a per-category usage breakdown and a recent-requests performance log — all computed from your own database.
@@ -146,6 +148,15 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.11.0 =
+* New: "Claude Connectors" tab on **MCP > Connection** — the default, first tab now. Instead of editing `claude_desktop_config.json`, paste the server URL directly into Claude's own Customize > Connectors > Add custom connector screen (claude.ai, Claude Desktop, and Claude mobile all share it), set Authentication to None, and add one Request header (`Authorization`) with the value shown. No config file, no JSON, nothing to merge. Requires the site to be reachable on the public internet (Claude's servers cannot reach localhost), and Claude's "Request headers" field is currently a beta rolling out gradually — the old config-file method is kept as its own tab for accounts that don't have it yet.
+
+= 2.10.0 =
+* New: One-click automated connector on **MCP > Connection**. A **Download** button now sits beside **Copy** on every snippet (all six client tabs plus the live generator) — it saves the exact config file directly, no copy-paste required. Cursor users additionally get a **Connect Cursor Automatically** button using Cursor's official one-click MCP install link, which opens Cursor and adds the server for you with no config file to open or edit at all.
+
+= 2.9.0 =
+* New: Configuration Generator on **MCP > Connection** — pick an AI tool (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) and an authentication method (API Key or Application Password), and the correct config snippet is built live in your browser, with a one-click copy button. Application Password mode never sends your credentials to the server — the header is computed client-side. OAuth is shown as a selectable method with a "Coming soon" state since it is not yet implemented server-side.
 
 = 2.8.0 =
 * New: Analytics & Performance Dashboard in **MCP > Analytics** — summary cards for total requests, most-used tool, average response time, and error rate; a per-category tool-usage breakdown with lightweight CSS progress bars; and a recent-requests performance log. Built entirely on the existing Audit Log database (`wp_wsp_mcp_audit_log`), which now also records each request's ability category and execution duration in milliseconds — no external service involved. Restricted to administrators (`manage_options`).

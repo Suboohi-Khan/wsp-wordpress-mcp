@@ -31,7 +31,7 @@ These three files give you complete project understanding without touching the c
 ## What this plugin is
 
 **Plugin Name:** WSP MCP - AI Agents Connector  
-**Version:** 2.6.8
+**Version:** 2.11.0
 **Slug/prefix:** `wsp`  
 **WP option key:** `wsp_mcp_abilities`  
 **Constant prefix:** `WSP_MCP_`
@@ -197,7 +197,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
 
 | Constant | Value |
 |---|---|
-| `WSP_MCP_VERSION` | `'2.6.6'` |
+| `WSP_MCP_VERSION` | `'2.11.0'` |
 | `WSP_MCP_OPTION` | `'wsp_mcp_abilities'` (per-ability on/off toggles) |
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 
@@ -609,10 +609,26 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
 - **Primary, native-transport page (v2.0).** Top card shows the native endpoint
   (`rest_url('wsp-mcp/v1/mcp')`) + API key with a Regenerate button (nonce-protected admin-post action
   `wsp_mcp_regenerate_key` → `WSP_MCP_Auth::regenerate_api_key()`).
-- Six tabbed, copy-to-clipboard snippets, all pointing at the native endpoint with the **API key
-  hardcoded into the auth header** (no `${VAR}` env interpolation — avoids the mcp-remote "missing env
-  var" failure). Server name auto-derives as `wsp-<host>`:
-  - **Claude Desktop** — `mcpServers` + `npx -y mcp-remote <url> --header "Authorization: Bearer <key>"` (stdio bridge, needs Node.js; Claude Desktop config files don't support remote HTTP directly).
+- **Seven tabs** total: the zero-config-file "Claude Connectors" tab (below) plus six tabbed,
+  copy-to-clipboard snippets, all pointing at the native endpoint with the **API key hardcoded into
+  the auth header** (no `${VAR}` env interpolation — avoids the mcp-remote "missing env var"
+  failure). Server name auto-derives as `wsp-<host>`:
+  - **Claude Connectors (v2.11.0, default-active tab, `#wsp-tab-claudeweb`):** not a config-file
+    snippet at all — Claude's **Customize > Connectors > Add custom connector** screen (a different
+    product surface from `claude_desktop_config.json`, shared by claude.ai/Desktop/mobile) takes a
+    bare **Remote MCP server URL** + a **Request header** instead of a file to edit. The tab shows
+    two copyable values: `#wsp-code-ccurl` (`$endpoint`) and `#wsp-code-ccheader` (`Bearer
+    <api_key>`, paste as the value of an `Authorization` header, Authentication set to `None`).
+    Wired with the same `makeCopyBtn()` helper as everything else, ids `wsp-copy-ccurl` /
+    `wsp-copy-ccheader`. Two constraints called out inline (not fixable from this plugin's side):
+    the site must be publicly reachable (Claude's cloud can't reach `localhost`), and Claude's
+    Request-headers field is a beta rolling out gradually — accounts without it yet fall back to the
+    **Claude Desktop (config file)** tab, which is unchanged, just no longer default-active.
+    Verified against Anthropic's docs (`/docs/connectors/custom/remote-mcp
+    #authenticating-with-request-headers`, `/docs/connectors/building/authentication`) before
+    shipping — do **not** invent a different header/UI flow without re-checking those pages, this
+    surface changes independently of this plugin.
+  - **Claude Desktop (`#wsp-tab-claude`)** — `mcpServers` + `npx -y mcp-remote <url> --header "Authorization: Bearer <key>"` (stdio bridge, needs Node.js; Claude Desktop config files don't support remote HTTP directly).
   - **Cursor** — native remote HTTP: `mcpServers.<name>.{ url, headers: { Authorization: "Bearer <key>" } }` (`~/.cursor/mcp.json`).
   - **Codex** — native streamable HTTP TOML: `[mcp_servers.<name>]` `url` + `http_headers = { "Authorization" = "Bearer <key>" }` (`~/.codex/config.toml`).
   - **Antigravity** — native remote HTTP, but the URL key is **`serverUrl`** (not `url`): `mcpServers.<name>.{ serverUrl, headers }` (`~/.gemini/config/mcp_config.json`).
@@ -624,6 +640,72 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
   Clipboard API is undefined on plain-HTTP hosts (e.g. `http://*.local` dev sites), where the old
   direct call threw synchronously and the buttons silently did nothing.
 - Same `.wsp-layout` / `.wsp-main` / `.wsp-side` two-column shell as the Settings page (v2.6.7).
+- **Configuration Generator (v2.9.0):** a new `.wsp-gen-box` section sits between the facts table and
+  the six static tabs. Tool `<select>` + a 3-way auth-method pill group (`API Key` / `Application
+  Password` / `OAuth`) drive a live, client-side-only preview (`#wsp-gen-code`) with its own copy
+  button (`#wsp-gen-copy`), re-rendered on every `change`/`input` event — no page reload, no server
+  round trip. Data needed by the JS (`endpoint`, `apiKey`, `connSlug`, `siteUrl`) is emitted once as
+  `window.WSP_MCP_GEN` via an inline `<script>` in the page markup (JSON-encoded with
+  `wp_json_encode()`, which escapes slashes by default so `</script>` cannot break out).
+  - **API Key** (default/recommended): identical output to the matching static tab below it — the
+    Bearer key is embedded directly in the header, same as the rest of the page.
+  - **Application Password:** reveals a WordPress-Username + Application-Password pair of inputs
+    (`#wsp-gen-username` / `#wsp-gen-password`, `type=password`). Nothing in these fields is ever
+    submitted to the server — the Basic-auth token is computed in-browser with `btoa()` and embedded
+    literally into the generated config's `--header`/`headers` value, matching how the API-key path
+    already embeds its secret directly rather than relying on `${VAR}` interpolation. For Claude
+    Desktop specifically, the generated `env` block also carries `WP_API_URL` / `WP_API_USERNAME` /
+    `WP_API_PASSWORD` as a human-readable record of the credential — those three keys are cosmetic
+    only, nothing in this plugin's own transport reads them back. **Do not resurrect this as a reason
+    to depend on `@automattic/mcp-wordpress-remote`** — the actual bridge is still `mcp-remote` →
+    the native `wsp-mcp/v1/mcp` endpoint (see the removed-in-v2.2 note above).
+    Below the HTTPS-only note (`#wsp-gen-apppw-notice`) is shown only when `location.protocol` is
+    plain HTTP and the host isn't `localhost`/`127.0.0.1`, since WP core itself refuses to let a
+    non-HTTPS, non-local site create Application Passwords.
+  - **OAuth:** selectable (so the picker matches what other modern MCP integrations expose) but
+    **not implemented server-side** — `class-auth.php` has no OAuth flow. Selecting it swaps the code
+    box for a "coming soon" notice (`#wsp-gen-oauth-note`) and disables the copy button. If OAuth
+    support is ever added to `WSP_MCP_Auth`, wire a real branch into `buildSnippet()`/`authHeader()`
+    here instead of leaving the placeholder.
+- **One-Click Automated Connector (v2.10.0):** removes the manual copy-paste step entirely, on both
+  the six static tabs and the live generator.
+  - **Download button:** every `.wsp-config-header` now wraps its buttons in a `.wsp-config-actions`
+    flex row — a new **Download** button sits beside **Copy**. Client-side `downloadFile(filename,
+    content)` builds a throwaway `Blob` + `<a download>` and clicks it, so one click writes the exact
+    file to the browser's download location — nothing to select, nothing to paste. `makeDownloadBtn(
+    btnId, codeId, filename)` wires the six static-tab buttons (`#wsp-download-claude/cursor/codex/
+    antigravity/openclaw/opencode` → `claude_desktop_config.json` / `mcp.json` / `config.toml` /
+    `mcp_config.json` / `openclaw.json` / `opencode.json`); the generator's own `#wsp-gen-download`
+    button reuses the same `downloadFile()` helper but derives its filename live from
+    `snip.filename.split("/").pop()` each render (the on-screen label still shows the full
+    `~/.cursor/mcp.json`-style path — browsers can't pick a destination *directory*, only a
+    filename, so the download uses the basename).
+  - **Cursor one-click connect:** Cursor supports a documented deep link —
+    `cursor://anysphere.cursor-deeplink/mcp/install?name=<slug>&config=<base64>` (see
+    https://cursor.com/docs/mcp/install-links) — where `config` is the **base64 of the bare server
+    object** (`{ url, headers }`, *not* wrapped in `{ "<name>": {...} }` — the name is carried
+    separately in the `name` param). Clicking it opens Cursor, which shows its own install-confirm
+    dialog and writes `~/.cursor/mcp.json` itself — no file to open or paste into at all. A
+    `.wsp-connect-callout` box with a `.wsp-connect-btn` link renders this:
+    - On the static **Cursor** tab, the href is built server-side in PHP (`$cursor_deeplink`,
+      computed right after `$cursor_json`) since the API key is already known.
+      **Gotcha:** `esc_url()` strips any protocol not in `wp_allowed_protocols()` by default, which
+      does **not** include `cursor` — echoing `esc_url( $cursor_deeplink )` bare would have silently
+      mangled the scheme and dead-ended the button. Fixed by passing the protocol allowlist
+      explicitly: `esc_url( $cursor_deeplink, array( 'cursor', 'https', 'http' ) )`. Any future
+      custom-scheme link on this page needs the same third argument.
+    - In the **generator**, `#wsp-gen-connect-callout` / `#wsp-gen-connect-btn` are hidden by default
+      and only shown when `tool === "cursor"` **and** `authHeader(method)` returns a real (non-null,
+      non-placeholder) header — i.e. API Key always qualifies, Application Password only once both
+      credential fields are filled in. `buildCursorDeeplink(name, endpoint, header)` (uses the
+      existing `b64()` helper) rebuilds the `href` on every `render()` call, same lifecycle as
+      `buildSnippet()`. Setting `.href` via JS is not passed through `esc_url()`/kses, so no
+      protocol-allowlist issue there — only the PHP-side echo needed the fix above.
+    - No equivalent deep link is wired for the other five clients — Claude Desktop, Codex,
+      Antigravity, OpenClaw and OpenCode have no publicly documented one-click MCP-install protocol
+      handler as of this writing. Don't invent one; if a client adds official support later, follow
+      the same pattern (verify the exact scheme/param shape against that vendor's docs before
+      shipping — see the Cursor link above for the level of confirmation expected).
 
 ### Promo cards — `promo-cards.php` (v2.6.7)
 
