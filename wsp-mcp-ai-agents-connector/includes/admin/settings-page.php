@@ -1,0 +1,291 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+function wsp_mcp_add_menu() {
+    // Menu position set to 110 to comply with core WP menu guidelines
+    add_menu_page(
+        'WSP MCP Abilities',
+        'MCP',
+        'manage_options',
+        'wsp-mcp-abilities',
+        'wsp_mcp_settings_page',
+        'dashicons-admin-generic',
+        110
+    );
+
+    add_submenu_page(
+        'wsp-mcp-abilities',
+        'Settings',
+        'Settings',
+        'manage_options',
+        'wsp-mcp-abilities'
+    );
+}
+
+/**
+ * Redirect the removed legacy "Config Files" page (page=wsp-mcp-config) to the
+ * native Connection page so old bookmarks don't hit a "permission denied" wall.
+ */
+function wsp_mcp_redirect_legacy_config_page() {
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+    if ( isset( $_GET['page'] ) && 'wsp-mcp-config' === sanitize_key( wp_unslash( $_GET['page'] ) ) && current_user_can( 'manage_options' ) ) {
+        wp_safe_redirect( admin_url( 'admin.php?page=wsp-mcp-connection' ) );
+        exit;
+    }
+}
+add_action( 'admin_init', 'wsp_mcp_redirect_legacy_config_page' );
+
+/**
+ * Enqueue settings page CSS and JS safely using WP structures.
+ */
+function wsp_mcp_enqueue_settings_assets( $hook ) {
+    if ( 'toplevel_page_wsp-mcp-abilities' !== $hook ) {
+        return;
+    }
+
+    $custom_css = '
+        .wsp-wrap{max-width:1180px;margin:30px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+        .wsp-header{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+        .wsp-header h1{margin:0;font-size:22px;font-weight:700;color:#1d2327}
+        .wsp-badge-ver{background:#0073aa;color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
+        .wsp-desc{color:#646970;margin-bottom:24px;font-size:13.5px;line-height:1.65}
+        .wsp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+        .wsp-stat{background:#fff;border:1px solid #dcdcde;border-radius:8px;padding:14px 20px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+        .wsp-stat-n{font-size:30px;font-weight:700;color:#1d2327}
+        .wsp-stat-l{font-size:11px;color:#787c82;margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
+        .wsp-stat--on .wsp-stat-n{color:#00a32a}
+        .wsp-stat--wr .wsp-stat-n{color:#d63638}
+        .wsp-group{background:#fff;border:1px solid #dcdcde;border-radius:8px;margin-bottom:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+        .wsp-gh{background:#f6f7f7;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid transparent;cursor:pointer;user-select:none;transition:background .12s}
+        .wsp-gh:hover{background:#f0f1f2}
+        .wsp-group.wsp-open .wsp-gh{border-bottom-color:#dcdcde}
+        .wsp-gt{font-weight:700;font-size:13.5px;color:#1d2327;margin:0;display:flex;align-items:center;gap:8px}
+        .wsp-chev{display:inline-block;color:#787c82;font-size:11px;transition:transform .2s;width:10px}
+        .wsp-group.wsp-open .wsp-chev{transform:rotate(90deg)}
+        .wsp-gh-right{display:flex;align-items:center;gap:14px}
+        /* Per-group tally: enabled abilities in green, disabled in red; a zero count greys out. */
+        .wsp-gcounts{display:inline-flex;align-items:center;gap:6px}
+        .wsp-gcount{font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;letter-spacing:.3px;border:1px solid transparent;white-space:nowrap}
+        .wsp-gcount--on{background:#e3f4e6;color:#00802b;border-color:#b8e2c2}
+        .wsp-gcount--off{background:#fdeaea;color:#b32d2e;border-color:#f3c1c1}
+        .wsp-gcount.wsp-gcount--zero{background:#f0f0f1;color:#8c8f94;border-color:#dcdcde}
+        .wsp-gbody{display:none}
+        .wsp-group.wsp-open .wsp-gbody{display:block}
+        .wsp-toggle-all{font-size:12px;color:#0073aa;cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;font-weight:600}
+        .wsp-row{display:grid;grid-template-columns:1fr 50px;align-items:center;padding:13px 20px;border-bottom:1px solid #f0f0f1;gap:12px;transition:background .12s}
+        .wsp-row:last-child{border-bottom:none}
+        .wsp-row:hover{background:#fafafa}
+        .wsp-al{font-weight:600;font-size:13px;color:#1d2327;display:flex;align-items:center;gap:7px;margin-bottom:3px}
+        .wsp-ad{font-size:12px;color:#787c82;line-height:1.5}
+        .wsp-ac{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px}
+        .wsp-ac--read{background:#e0f0fa;color:#0073aa}
+        .wsp-ac--write{background:#fde8e8;color:#d63638}
+        .wsp-sw{position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0}
+        .wsp-sw input{opacity:0;width:0;height:0}
+        .wsp-sl{position:absolute;cursor:pointer;inset:0;background:#c3c4c7;border-radius:34px;transition:.25s}
+        .wsp-sl:before{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+        input:checked+.wsp-sl{background:#00a32a}
+        input:checked+.wsp-sl:before{transform:translateX(20px)}
+        .wsp-savebar{display:flex;align-items:center;gap:16px;margin-top:24px;padding:18px 20px;background:#fff;border:1px solid #dcdcde;border-radius:8px}
+        .wsp-savebar .button-primary{font-size:14px;padding:7px 20px;height:auto}
+        .wsp-savenote{font-size:12px;color:#787c82}
+    ' . wsp_mcp_promo_css();
+    wp_add_inline_style( 'common', $custom_css );
+
+    $custom_js = '
+        document.addEventListener("DOMContentLoaded", function(){
+            var STORE = "wsp_acc_open";
+
+            function readOpen(){
+                try { return JSON.parse(localStorage.getItem(STORE)) || []; }
+                catch(e){ return []; }
+            }
+            function writeOpen(list){
+                try { localStorage.setItem(STORE, JSON.stringify(list)); } catch(e){}
+            }
+
+            // Restore open/closed state
+            var open = readOpen();
+            document.querySelectorAll(".wsp-group").forEach(function(grp){
+                if (open.indexOf(grp.dataset.group) !== -1) {
+                    grp.classList.add("wsp-open");
+                }
+            });
+
+            // Accordion toggle on header click
+            document.querySelectorAll(".wsp-gh").forEach(function(head){
+                head.addEventListener("click", function(e){
+                    if (e.target.closest(".wsp-toggle-all")) return;
+                    var grp = head.closest(".wsp-group");
+                    grp.classList.toggle("wsp-open");
+                    var list = readOpen();
+                    var name = grp.dataset.group;
+                    var i = list.indexOf(name);
+                    if (grp.classList.contains("wsp-open")) {
+                        if (i === -1) list.push(name);
+                    } else if (i !== -1) {
+                        list.splice(i, 1);
+                    }
+                    writeOpen(list);
+                });
+            });
+
+            // Keep the enabled/disabled tally in sync
+            function refreshCount(g){
+                var wrap = document.querySelector(\'.wsp-gcounts[data-group="\' + g + \'"]\');
+                if (!wrap) return;
+                var boxes = document.querySelectorAll(\'input[data-group="\' + g + \'"]\');
+                var on = Array.from(boxes).filter(function(b){ return b.checked; }).length;
+                var off = boxes.length - on;
+
+                var onBadge  = wrap.querySelector(\'[data-role="on"]\');
+                var offBadge = wrap.querySelector(\'[data-role="off"]\');
+                onBadge.textContent  = on + " Enabled";
+                offBadge.textContent = off + " Disabled";
+                onBadge.classList.toggle("wsp-gcount--zero", on === 0);
+                offBadge.classList.toggle("wsp-gcount--zero", off === 0);
+            }
+
+            // Write confirmation
+            document.querySelectorAll("input[type=\'checkbox\'][data-group]").forEach(function(cb){
+                cb.addEventListener("change", function(){
+                    if (this.dataset.access === "write" && this.checked &&
+                        !confirm("⚠️ This ability can MODIFY live site content.\n\nAre you sure you want to enable it?")) {
+                        this.checked = false;
+                    }
+                    refreshCount(this.dataset.group);
+                });
+            });
+
+            document.querySelectorAll(".wsp-toggle-all").forEach(function(btn){
+                btn.addEventListener("click", function(){
+                    var g = this.dataset.group;
+                    var boxes = document.querySelectorAll(\'input[data-group="\' + g + \'"]\');
+                    var allOn = Array.from(boxes).every(function(b){ return b.checked; });
+                    boxes.forEach(function(b){ b.checked = !allOn; });
+                    refreshCount(g);
+                });
+            });
+        });
+    ';
+    wp_add_inline_script( 'common', $custom_js );
+}
+add_action( 'admin_enqueue_scripts', 'wsp_mcp_enqueue_settings_assets' );
+
+function wsp_mcp_settings_page() {
+    if ( ! current_user_can( 'manage_options' ) ) return;
+
+    $registry = wsp_mcp_ability_registry();
+    $settings = wsp_mcp_get_settings();
+    $groups   = array();
+    foreach ( $registry as $key => $cfg ) {
+        $groups[ $cfg['group'] ][ $key ] = $cfg;
+    }
+
+    $icons   = array(
+        'Posts'                  => '📝',
+        'Pages'                  => '📄',
+        'Taxonomy'               => '🏷️',
+        'Comments'               => '💬',
+        'Media'                  => '🖼️',
+        'Users'                  => '👥',
+        'Search'                 => '🔍',
+        'Site'                   => '🌐',
+        'Elementor'              => '⚡',
+        'Ultimate Addons Elementor'=> '🚀',
+        'Yoast SEO'              => '🔎',
+        'Rank Math SEO'          => '🎯',
+        'WooCommerce'            => '🛍️',
+        'Advanced Custom Fields'    => '🧩',
+        'Gravity Forms'             => '📋',
+        'Contact Form 7'           => '📬',
+        'WPForms'                  => '📊',
+    );
+    $total   = count( $settings );
+    $enabled = count( array_filter( $settings ) );
+    $writes  = 0;
+    foreach ( $settings as $key => $on ) {
+        if ( $on && isset( $registry[ $key ] ) && 'write' === $registry[ $key ]['access'] ) {
+            $writes++;
+        }
+    }
+    ?>
+    <div class="wsp-wrap">
+      <div class="wsp-layout">
+        <div class="wsp-main">
+        <div class="wsp-header">
+            <h1>⚙️ WSP MCP Abilities</h1>
+            <span class="wsp-badge-ver">v<?php echo esc_html( WSP_MCP_VERSION ); ?></span>
+        </div>
+        <p class="wsp-desc">
+            Control exactly what <strong>your AI agents</strong> can <strong>read</strong> and <strong>write</strong> on your WordPress site via MCP.
+            <span style="color:#d63638;font-weight:600;"> ⚠ Write abilities modify your live site — enable with care.</span>
+        </p>
+
+        <div class="wsp-stats">
+            <div class="wsp-stat"><div class="wsp-stat-n"><?php echo esc_html( $total ); ?></div><div class="wsp-stat-l">Total Abilities</div></div>
+            <div class="wsp-stat wsp-stat--on"><div class="wsp-stat-n"><?php echo esc_html( $enabled ); ?></div><div class="wsp-stat-l">Enabled</div></div>
+            <div class="wsp-stat wsp-stat--wr"><div class="wsp-stat-n"><?php echo esc_html( $writes ); ?></div><div class="wsp-stat-l">Write Access Active</div></div>
+        </div>
+
+        <form method="post" action="options.php">
+            <?php settings_fields( 'wsp_mcp_settings_group' ); ?>
+
+            <?php foreach ( $groups as $gname => $abilities ) :
+                $g_total = count( $abilities );
+                $g_on    = 0;
+                foreach ( $abilities as $k => $c ) {
+                    if ( ! empty( $settings[ $k ] ) ) {
+                        $g_on++;
+                    }
+                }
+                ?>
+            <div class="wsp-group" data-group="<?php echo esc_attr( $gname ); ?>">
+                <div class="wsp-gh">
+                    <h3 class="wsp-gt"><span class="wsp-chev">&#9654;</span><?php echo isset( $icons[ $gname ] ) ? esc_html( $icons[ $gname ] ) . ' ' : ''; ?><?php echo esc_html( $gname ); ?></h3>
+                    <div class="wsp-gh-right">
+                        <?php $g_off = $g_total - $g_on; ?>
+                        <span class="wsp-gcounts" data-group="<?php echo esc_attr( $gname ); ?>">
+                            <span class="wsp-gcount wsp-gcount--on<?php echo 0 === $g_on ? ' wsp-gcount--zero' : ''; ?>" data-role="on"><?php echo esc_html( $g_on ); ?> Enabled</span>
+                            <span class="wsp-gcount wsp-gcount--off<?php echo 0 === $g_off ? ' wsp-gcount--zero' : ''; ?>" data-role="off"><?php echo esc_html( $g_off ); ?> Disabled</span>
+                        </span>
+                        <button type="button" class="wsp-toggle-all" data-group="<?php echo esc_attr( $gname ); ?>">Toggle All</button>
+                    </div>
+                </div>
+                <div class="wsp-gbody">
+                <?php foreach ( $abilities as $key => $cfg ) : ?>
+                <div class="wsp-row">
+                    <div>
+                        <div class="wsp-al">
+                            <?php echo esc_html( $cfg['label'] ); ?>
+                            <span class="wsp-ac wsp-ac--<?php echo esc_attr( $cfg['access'] ); ?>"><?php echo esc_html( $cfg['access'] ); ?></span>
+                        </div>
+                        <div class="wsp-ad"><?php echo esc_html( $cfg['description'] ); ?></div>
+                    </div>
+                    <label class="wsp-sw">
+                        <input type="checkbox"
+                            name="<?php echo esc_attr( WSP_MCP_OPTION ); ?>[<?php echo esc_attr( $key ); ?>]"
+                            value="1"
+                            data-group="<?php echo esc_attr( $gname ); ?>"
+                            data-access="<?php echo esc_attr( $cfg['access'] ); ?>"
+                            <?php checked( ! empty( $settings[ $key ] ) ); ?>>
+                        <span class="wsp-sl"></span>
+                    </label>
+                </div>
+                <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+
+            <div class="wsp-savebar">
+                <?php submit_button( '💾 Save Settings', 'primary', 'submit', false ); ?>
+                <span class="wsp-savenote">Changes take effect immediately for all active MCP sessions.</span>
+            </div>
+        </form>
+        </div><!-- .wsp-main -->
+
+        <?php wsp_mcp_render_promo_cards( 'abilities_page' ); ?>
+      </div><!-- .wsp-layout -->
+    </div>
+    <?php
+}
