@@ -1,4 +1,4 @@
-=== WSP MCP - AI Agents Connector ===
+=== WSP MCP - WordPress MCP - Connect Claude, codex, antigravity or any other AI Agent ===
 Contributors: bilalnaseer
 Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
