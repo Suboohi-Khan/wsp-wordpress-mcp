@@ -31,7 +31,7 @@ These three files give you complete project understanding without touching the c
 ## What this plugin is
 
 **Plugin Name:** WSP MCP - AI Agents Connector  
-**Version:** 2.6.8
+**Version:** 2.7.1
 **Slug/prefix:** `wsp`  
 **WP option key:** `wsp_mcp_abilities`  
 **Constant prefix:** `WSP_MCP_`
@@ -197,7 +197,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
 
 | Constant | Value |
 |---|---|
-| `WSP_MCP_VERSION` | `'2.6.6'` |
+| `WSP_MCP_VERSION` | `'2.7.1'` |
 | `WSP_MCP_OPTION` | `'wsp_mcp_abilities'` (per-ability on/off toggles) |
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 
@@ -657,6 +657,7 @@ Shared by **both** admin pages; loaded before them in the main plugin file so th
 - MIME types: `sanitize_mime_type($input['type'])`.
 - Permission callbacks: `__return_true` for public reads; `current_user_can('cap')` closures for writes and sensitive reads.
 - MCP requests are authenticated inside the native server handler (App Password / Bearer key); per-tool capability checks via `require_cap()`.
+- **`require_cap()` only checks the ONE broad primitive capability recorded at registration — it cannot answer "may this user act on THIS object?".** Every write callback that accepts a caller-supplied object ID MUST additionally call the object-level guards in `includes/abilities/guard.php`: `wsp_mcp_guard_edit_post($id, $type)` / `wsp_mcp_guard_delete_post($id, $type)` enforce the `edit_post` / `delete_post` meta capability and pin the post type; `wsp_mcp_guard_post_status($post, $status)` blocks `publish`/`future`/`private` transitions unless the caller holds `publish_posts`. All return `WP_Error` on denial. Application Password callers run as their real (possibly Contributor-level) user, so skipping this is a broken-access-control bug (see CHANGELOG `[2.7.1]`, Patchstack). Currently applied in `posts.php`, `pages.php`, `media.php`; `yoast.php` / `rankmath.php` do their own equivalent `edit_post` check.
 - Admin-post actions (e.g. API-key regenerate) are nonce-protected with `wp_nonce_field()` / `check_admin_referer()` and gated by `current_user_can('manage_options')`.
 - Output in admin pages is escaped (`esc_html`/`esc_attr`/`esc_url`/`esc_textarea`/`esc_js`).
 

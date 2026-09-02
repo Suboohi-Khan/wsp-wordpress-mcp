@@ -8,6 +8,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.7.1] — 2026-09-02
+
+### Security — Object-level authorization on post/page/media write tools (`includes/abilities/guard.php` — new file, `includes/abilities/posts.php`, `includes/abilities/pages.php`, `includes/abilities/media.php`)
+- **Reported by Patchstack (Ananda Dhakal): "Authenticated (Contributor+) Broken Access Control", WSP MCP `<= 2.7.0`.** The native tool registry records one broad primitive capability per tool and `do_tools_call()` checks only that via `require_cap()` before invoking the callback. `wsp_update_post` asked only for `edit_posts`, `wsp_delete_post` only for `delete_posts` — both of which a stock Contributor holds. Application Password callers authenticate as their real low-privileged user (`class-auth.php` accepts any core-established login and, unlike the API-key path, does **not** map to an admin), so the callbacks in `posts.php` / `pages.php` / `media.php` passed a caller-chosen object ID straight to `wp_update_post()` / `wp_trash_post()` / `wp_delete_attachment()` with no ownership, post-type or status-transition check. A Contributor could overwrite, publish or unpublish an Administrator- or Editor-owned post; modify a page despite lacking `edit_pages`; set `status=publish` despite lacking `publish_posts`; and (where enabled) trash any post object by ID.
+- **Fix:** new `includes/abilities/guard.php` exposes `wsp_mcp_guard_edit_post()`, `wsp_mcp_guard_delete_post()` and `wsp_mcp_guard_post_status()`. Every write callback that takes a caller-supplied object ID — `wsp_execute_update_post`, `wsp_execute_delete_post`, `wsp_execute_update_page`, `wsp_execute_delete_page`, `wsp_execute_update_media`, `wsp_execute_delete_media`, `wsp_execute_set_featured_image` — now loads the object, enforces the `edit_post` / `delete_post` **meta** capability for that specific ID, restricts the tool to its expected post type (`post` / `page` / `attachment`), and rejects a `publish`, `future` or `private` status transition unless the caller holds the post type's `publish_posts` capability. Denials return a `WP_Error`, which the server surfaces as a tool error and the audit log records as `error`. This matches what WordPress core's own REST controllers check. `wsp_yoast_update_seo` / `wsp_rankmath_update_seo` already performed the `edit_post` check and are unchanged.
+- No API change for legitimate callers: an Editor or Administrator (or an API-key request mapped to admin) passes every new check exactly as before.
+
+---
+
 ## [2.6.8] — 2026-08-12
 
 ### Fixed — `tools/list` straight after `initialize` rejected as an unknown session (`includes/server/class-session-store.php`)

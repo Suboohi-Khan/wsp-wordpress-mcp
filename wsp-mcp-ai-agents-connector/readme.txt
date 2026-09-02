@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.7.0
+Stable tag: 2.7.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -145,6 +145,9 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.7.1 =
+* Security: Fixed a broken access control issue (reported by Patchstack) where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. This mirrors the checks WordPress core's own REST endpoints perform.
 
 = 2.7.0 =
 * New: Full Audit Log. Every MCP `tools/call` request is now recorded in a dedicated, self-hosted database table (`wp_wsp_mcp_audit_log`) — tool name, timestamp, acting user, request IP, and outcome (success, denied, or error). No external API or paid service is involved.
