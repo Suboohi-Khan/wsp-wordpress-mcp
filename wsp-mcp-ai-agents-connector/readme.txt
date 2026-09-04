@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.12.1
+Stable tag: 2.7.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -149,7 +149,7 @@ https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
 
-= 2.12.1 =
+= 2.7.1 =
 * Security: Fixed a broken access control issue (reported by Patchstack) where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. New shared helper file `includes/abilities/guard.php`. Merged from the upstream project.
 
 = 2.11.0 =

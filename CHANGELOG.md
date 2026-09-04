@@ -8,7 +8,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.12.1] — 2026-09-04
+## [2.7.1] — 2026-09-04
 
 ### Security — object-level capability checks on write tools (merged from upstream `bilalnaseer/wsp-wordpress-mcp`)
 - **Fixed a broken access control issue (reported by Patchstack).** `wsp/update-post`, `wsp/delete-post`,
