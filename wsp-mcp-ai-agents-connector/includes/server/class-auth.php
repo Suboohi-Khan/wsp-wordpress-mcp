@@ -1,13 +1,22 @@
 <?php
 /**
- * MCP authentication (Milestone M4).
+ * MCP authentication (Milestone M4; OAuth added later for "paste a URL only"
+ * Claude Connectors).
  *
- * Accepts three credential types at the MCP endpoint:
+ * Accepts four credential types at the MCP endpoint:
  *   1. Application Password (HTTP Basic) — validated by WordPress core before
  *      our handler runs, so the current user is already set when we see it.
  *   2. Plugin API key via the X-WSP-MCP-API-Key header.
  *   3. The same API key presented as `Authorization: Bearer <key>` (the
  *      convention most MCP clients use for static credentials).
+ *   4. An OAuth access token, also presented as `Authorization: Bearer
+ *      <token>`, issued by this plugin's own native authorization server
+ *      (see class-oauth-server.php + class-oauth-store.php). Tried whenever a
+ *      bearer value doesn't match the static API key, since both share the
+ *      same header. Unlike the static key (always mapped to an admin), an
+ *      OAuth token is bound to whichever WordPress user actually clicked
+ *      "Allow" on the consent screen, so capability checks reflect that
+ *      specific user.
  *
  * The API key is stored in admin-only settings, so a request bearing it is
  * treated as administrator-trusted and mapped to a site admin user so that
@@ -53,13 +62,22 @@ class WSP_MCP_Auth {
 
 		$settings_key = self::get_api_key();
 
-		// 2. Authorization: Bearer <api-key>.
+		// 2. Authorization: Bearer <api-key-or-oauth-token>.
 		$auth = $request->get_header( 'authorization' );
 		if ( is_string( $auth ) && 0 === stripos( $auth, 'bearer ' ) ) {
 			$token = trim( substr( $auth, 7 ) );
 			if ( hash_equals( $settings_key, $token ) ) {
 				self::assume_admin();
 				return true;
+			}
+			// Not the static key — try it as a token from this plugin's own
+			// OAuth authorization server (class-oauth-server.php).
+			if ( class_exists( 'WSP_MCP_OAuth_Store' ) ) {
+				$oauth = WSP_MCP_OAuth_Store::validate_access_token( $token );
+				if ( is_array( $oauth ) && $oauth['user_id'] > 0 ) {
+					wp_set_current_user( $oauth['user_id'] );
+					return true;
+				}
 			}
 		}
 
@@ -125,16 +143,31 @@ class WSP_MCP_Auth {
 		}
 	}
 
-	/** Build a 401 challenge response. */
+	/**
+	 * Build a 401 challenge response.
+	 *
+	 * The WWW-Authenticate header's `resource_metadata` parameter is what lets
+	 * Claude (and any other spec-compliant MCP client) discover this plugin's
+	 * native OAuth authorization server with nothing more than the endpoint
+	 * URL — see class-oauth-server.php and
+	 * https://claude.com/docs/connectors/building/authentication. Claude only
+	 * honors this pointer on a 401, never on a 200.
+	 */
 	private static function challenge() {
 		$response = new WP_REST_Response( array(
 			'jsonrpc' => '2.0',
 			'error'   => array(
 				'code'    => -32001,
-				'message' => 'Authentication required. Use an Application Password (Basic), Authorization: Bearer <api-key>, or the X-WSP-MCP-API-Key header.',
+				'message' => 'Authentication required. Use an Application Password (Basic), Authorization: Bearer <api-key-or-oauth-token>, or the X-WSP-MCP-API-Key header.',
 			),
 		), 401 );
-		$response->header( 'WWW-Authenticate', 'Bearer' );
+		$resource_metadata = class_exists( 'WSP_MCP_OAuth_Server' )
+			? WSP_MCP_OAuth_Server::protected_resource_metadata_url()
+			: '';
+		$www_authenticate = $resource_metadata
+			? 'Bearer resource_metadata="' . $resource_metadata . '"'
+			: 'Bearer';
+		$response->header( 'WWW-Authenticate', $www_authenticate );
 		$response->header( 'Cache-Control', 'no-store, no-cache, must-revalidate, private' );
 		return $response;
 	}

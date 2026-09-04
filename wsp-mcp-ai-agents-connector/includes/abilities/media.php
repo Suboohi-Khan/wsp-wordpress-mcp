@@ -106,10 +106,9 @@ function wsp_execute_count_media( $input ) {
  * Update the title, alt text, caption, or description of a media file by ID.
  */
 function wsp_execute_update_media( $input ) {
-    $id = isset( $input['id'] ) ? intval( $input['id'] ) : 0;
-    if ( 'attachment' !== get_post_type( $id ) ) {
-        return array( 'success' => false, 'error' => 'Media item not found.' );
-    }
+    $guard = wsp_mcp_guard_edit_post( isset( $input['id'] ) ? $input['id'] : 0, 'attachment' );
+    if ( is_wp_error( $guard ) ) return $guard;
+    $id = $guard->ID;
     $args = array( 'ID' => $id );
     if ( isset( $input['title'] ) )       $args['post_title']   = sanitize_text_field( wp_unslash( $input['title'] ) );
     if ( isset( $input['caption'] ) )     $args['post_excerpt'] = sanitize_text_field( wp_unslash( $input['caption'] ) );
@@ -131,10 +130,9 @@ function wsp_execute_update_media( $input ) {
  * Permanently delete a media file from the media library by ID.
  */
 function wsp_execute_delete_media( $input ) {
-    $id = isset( $input['id'] ) ? intval( $input['id'] ) : 0;
-    if ( 'attachment' !== get_post_type( $id ) ) {
-        return array( 'success' => false, 'error' => 'Media item not found.' );
-    }
+    $guard = wsp_mcp_guard_delete_post( isset( $input['id'] ) ? $input['id'] : 0, 'attachment' );
+    if ( is_wp_error( $guard ) ) return $guard;
+    $id = $guard->ID;
     $deleted = wp_delete_attachment( $id, true );
     return $deleted
         ? array( 'success' => true,  'message' => "Media {$id} permanently deleted." )
@@ -371,9 +369,8 @@ function wsp_execute_set_featured_image( $input ) {
         return array( 'success' => false, 'error' => 'attachment_id is required.' );
     }
 
-    if ( ! get_post( $post_id ) ) {
-        return array( 'success' => false, 'error' => "Post {$post_id} not found." );
-    }
+    $guard = wsp_mcp_guard_edit_post( $post_id );
+    if ( is_wp_error( $guard ) ) return $guard;
     if ( 'attachment' !== get_post_type( $attachment_id ) ) {
         return array( 'success' => false, 'error' => "Attachment {$attachment_id} not found or not an image." );
     }

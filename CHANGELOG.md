@@ -8,6 +8,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.12.1] — 2026-09-04
+
+### Security — object-level capability checks on write tools (merged from upstream `bilalnaseer/wsp-wordpress-mcp`)
+- **Fixed a broken access control issue (reported by Patchstack).** `wsp/update-post`, `wsp/delete-post`,
+  `wsp/update-page`, `wsp/delete-page`, `wsp/update-media`, `wsp/delete-media`, and
+  `wsp_execute_set_featured_image` previously checked only the broad primitive capability
+  (`edit_posts` / `delete_posts`) before acting, not whether the caller could act on *that specific*
+  object. A Contributor authenticating with their own Application Password could edit, publish,
+  unpublish, or trash a post/page/attachment owned by an Administrator or Editor once the
+  corresponding write tool was enabled in MCP > Settings.
+- **New file `includes/abilities/guard.php`** — shared helpers used by every affected callback:
+  `wsp_mcp_guard_edit_post( $id, $allowed_types )` / `wsp_mcp_guard_delete_post( $id, $allowed_types )`
+  load the target, verify its post type, and enforce `current_user_can( 'edit_post', $id )` /
+  `current_user_can( 'delete_post', $id )` (WordPress's own per-object meta-capability, not just the
+  primitive); `wsp_mcp_guard_post_status( $post, $status )` additionally requires the post type's
+  publish capability before accepting a `publish`, `future`, or `private` status. Mirrors the checks
+  WordPress core's own REST controllers perform.
+- `posts.php`, `pages.php`, `media.php`: `update`/`delete` (and `set_featured_image`) now resolve the
+  target through the matching guard and bail with its `WP_Error` before touching anything.
+- No existing tool, ability, or admin UI was removed or changed by this merge — additive only.
+
 ## [2.11.0] — 2026-09-02
 
 ### New — "Claude Connectors" tab on `MCP > Connection` (`includes/admin/connection-page.php`)

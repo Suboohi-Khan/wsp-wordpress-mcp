@@ -2,7 +2,7 @@
 
 > **By [WebSensePro](https://websensepro.com) — Official Shopify Partner & WordPress Agency**
 
-[![Version](https://img.shields.io/badge/Version-2.6.8-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
+[![Version](https://img.shields.io/badge/Version-2.12.1-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
 [![YouTube](https://img.shields.io/badge/YouTube-140K%2B%20Subscribers-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/websensepro)
 [![License](https://img.shields.io/badge/License-GPL%202.0-green?style=for-the-badge)](LICENSE)
 
@@ -13,6 +13,10 @@
 [![WSP WordPress MCP — Full Tutorial](https://img.youtube.com/vi/1hGSUAdRxiU/maxresdefault.jpg)](https://youtu.be/1hGSUAdRxiU)
 
 ---
+
+## ✨ What's New in v2.12.1
+
+- 🔒 **Security: object-level authorization on post, page & media write tools** — reported by Patchstack (Ananda Dhakal) as an *Authenticated (Contributor+) Broken Access Control* issue. **Update Post**, **Delete Post**, **Update Page**, **Delete Page**, **Update Media**, **Delete Media**, and **Set Featured Image** only checked a broad primitive capability (`edit_posts` / `delete_posts`) — which a stock Contributor holds — and then passed a caller-chosen object ID straight to WordPress without checking ownership, post type, or the requested status. Once an admin had enabled one of these write tools, a Contributor using their own Application Password could overwrite, publish, unpublish, or trash a post, page, or attachment owned by an Administrator or Editor. All of these callbacks now load the target object and enforce the per-object `edit_post` / `delete_post` meta capability, restrict each tool to its expected post type (`post` / `page` / `attachment`), and require the post type's publish capability before accepting a `publish`, `future`, or `private` status — the same checks WordPress core's own REST endpoints perform. Editors and Administrators are unaffected. Write tools remain **off by default**. Merged from [bilalnaseer/wsp-wordpress-mcp](https://github.com/bilalnaseer/wsp-wordpress-mcp).
 
 ## ✨ What's New in v2.6.8
 

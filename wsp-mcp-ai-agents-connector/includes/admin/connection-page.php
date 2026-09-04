@@ -138,7 +138,6 @@ function wsp_mcp_enqueue_connection_assets() {
 					});
 				}
 				makeCopyBtn("wsp-copy-ccurl",       "wsp-code-ccurl");
-				makeCopyBtn("wsp-copy-ccheader",    "wsp-code-ccheader");
 				makeCopyBtn("wsp-copy-claude",      "wsp-code-claude");
 				makeCopyBtn("wsp-copy-cursor",      "wsp-code-cursor");
 				makeCopyBtn("wsp-copy-codex",       "wsp-code-codex");
@@ -522,10 +521,10 @@ function wsp_mcp_connection_page() {
 		</div>
 
 		<div class="wsp-gen-box">
-			<h2><?php esc_html_e( '🔧 Configuration Generator', 'wsp-mcp-ai-agents-connector' ); ?></h2>
-			<p class="wsp-gen-sub"><?php esc_html_e( 'Pick your AI tool and an authentication method — the config below updates live and never leaves your browser.', 'wsp-mcp-ai-agents-connector' ); ?></p>
+			<h2 style="display:none;"><?php esc_html_e( '🔧 Configuration Generator', 'wsp-mcp-ai-agents-connector' ); ?></h2>
+			<p class="wsp-gen-sub" style="display:none;"><?php esc_html_e( 'Pick your AI tool and an authentication method — the config below updates live and never leaves your browser.', 'wsp-mcp-ai-agents-connector' ); ?></p>
 
-			<div class="wsp-gen-row">
+			<div class="wsp-gen-row" style="display:none;">
 				<label class="wsp-gen-label" for="wsp-gen-tool"><?php esc_html_e( 'AI Tool', 'wsp-mcp-ai-agents-connector' ); ?></label>
 				<select id="wsp-gen-tool" class="wsp-gen-select">
 					<option value="claude"><?php esc_html_e( 'Claude Desktop', 'wsp-mcp-ai-agents-connector' ); ?></option>
@@ -537,7 +536,7 @@ function wsp_mcp_connection_page() {
 				</select>
 			</div>
 
-			<div class="wsp-gen-row">
+			<div class="wsp-gen-row" style="display:none;">
 				<label class="wsp-gen-label"><?php esc_html_e( 'Authentication Method', 'wsp-mcp-ai-agents-connector' ); ?></label>
 				<div class="wsp-gen-pills">
 					<label class="wsp-gen-pill">
@@ -618,21 +617,21 @@ function wsp_mcp_connection_page() {
 			<button type="button" class="wsp-tab-btn" data-tab="opencode">OpenCode</button>
 		</div>
 
-		<!-- Claude Connectors (claude.ai / Claude Desktop / mobile — no config file) -->
+		<!-- Claude Connectors (claude.ai / Claude Desktop / mobile — no config file, no header, real login) -->
 		<div class="wsp-tab-panel wsp-tab-panel-active" id="wsp-tab-claudeweb">
 			<div class="wsp-connect-callout">
 				<div>
-					<strong><?php esc_html_e( '⚡ Paste a URL — no config file at all', 'wsp-mcp-ai-agents-connector' ); ?></strong>
-					<p><?php esc_html_e( 'Claude\'s built-in Connectors screen (separate from the old claude_desktop_config.json method) lets you add this server with just a URL and one header — never opens a text editor.', 'wsp-mcp-ai-agents-connector' ); ?></p>
+					<strong><?php esc_html_e( '⚡ Paste a URL — nothing else to copy', 'wsp-mcp-ai-agents-connector' ); ?></strong>
+					<p><?php esc_html_e( 'This site runs its own OAuth login. Paste the URL below into Claude\'s Connectors screen, click Connect, and log in when Claude asks — no header, no API key, nothing to copy but the URL.', 'wsp-mcp-ai-agents-connector' ); ?></p>
 				</div>
 			</div>
 			<div class="wsp-config-box">
 				<div class="wsp-instructions">
-					<p><span class="wsp-badge"><?php esc_html_e( 'Direct HTTP', 'wsp-mcp-ai-agents-connector' ); ?></span> <?php esc_html_e( 'Works in Claude.ai, Claude Desktop, and Claude mobile — they all share the same Connectors settings.', 'wsp-mcp-ai-agents-connector' ); ?></p>
+					<p><span class="wsp-badge"><?php esc_html_e( 'OAuth login', 'wsp-mcp-ai-agents-connector' ); ?></span> <?php esc_html_e( 'Works in Claude.ai, Claude Desktop, and Claude mobile — they all share the same Connectors settings.', 'wsp-mcp-ai-agents-connector' ); ?></p>
 					<p>1. <?php esc_html_e( 'In Claude, open', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Customize', 'wsp-mcp-ai-agents-connector' ); ?> &gt; <?php esc_html_e( 'Connectors', 'wsp-mcp-ai-agents-connector' ); ?></strong> <?php esc_html_e( '(Team/Enterprise: Organization settings > Connectors) and click', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Add custom connector', 'wsp-mcp-ai-agents-connector' ); ?></strong>.</p>
-					<p>2. <?php esc_html_e( 'Paste the URL below into', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Remote MCP server URL', 'wsp-mcp-ai-agents-connector' ); ?></strong>.</p>
-					<p>3. <?php esc_html_e( 'Set', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Authentication', 'wsp-mcp-ai-agents-connector' ); ?></strong> <?php esc_html_e( 'to', 'wsp-mcp-ai-agents-connector' ); ?> <code>None</code>.</p>
-					<p>4. <?php esc_html_e( 'Open', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Request headers', 'wsp-mcp-ai-agents-connector' ); ?></strong> <?php esc_html_e( '(select "Custom header" if', 'wsp-mcp-ai-agents-connector' ); ?> <code>authorization</code> <?php esc_html_e( 'is not already offered) and add one: name', 'wsp-mcp-ai-agents-connector' ); ?> <code>Authorization</code>, <?php esc_html_e( 'value the second box below, marked Required — then click Add.', 'wsp-mcp-ai-agents-connector' ); ?></p>
+					<p>2. <?php esc_html_e( 'Paste the URL below into', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Remote MCP server URL', 'wsp-mcp-ai-agents-connector' ); ?></strong> <?php esc_html_e( 'and click Add — leave Authentication on its default (Claude detects this server supports OAuth automatically).', 'wsp-mcp-ai-agents-connector' ); ?></p>
+					<p>3. <?php esc_html_e( 'Click', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Connect', 'wsp-mcp-ai-agents-connector' ); ?></strong> <?php esc_html_e( 'next to the new connector. Claude opens this site\'s own login page — sign in (or you\'ll already be signed in), then click', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Allow', 'wsp-mcp-ai-agents-connector' ); ?></strong>.</p>
+					<p>4. <?php esc_html_e( 'Done — you\'re taken back to Claude, already connected. Nothing to copy or paste beyond the URL.', 'wsp-mcp-ai-agents-connector' ); ?></p>
 				</div>
 				<div class="wsp-config-header">
 					<span class="wsp-config-title"><?php esc_html_e( 'Remote MCP server URL', 'wsp-mcp-ai-agents-connector' ); ?></span>
@@ -643,18 +642,13 @@ function wsp_mcp_connection_page() {
 					</div>
 				</div>
 				<pre class="wsp-code-area" id="wsp-code-ccurl" style="white-space:normal;word-break:break-all;"><?php echo esc_html( $endpoint ); ?></pre>
-				<div class="wsp-config-header">
-					<span class="wsp-config-title"><?php esc_html_e( 'Request header value (name: Authorization)', 'wsp-mcp-ai-agents-connector' ); ?></span>
-					<div class="wsp-config-actions">
-						<button type="button" class="wsp-copy-btn" id="wsp-copy-ccheader">
-							<span class="dashicons dashicons-clipboard" style="font-size:16px;width:16px;height:16px;"></span> <?php esc_html_e( 'Copy', 'wsp-mcp-ai-agents-connector' ); ?>
-						</button>
-					</div>
-				</div>
-				<pre class="wsp-code-area" id="wsp-code-ccheader" style="white-space:normal;word-break:break-all;"><?php echo esc_html( 'Bearer ' . $api_key ); ?></pre>
 			</div>
 			<p class="wsp-gen-notice" style="margin-top:14px;">
-				<?php esc_html_e( '⚠ Two things to check first: (1) this site must be reachable on the public internet with a real domain — Claude\'s servers cannot reach localhost or a private network. (2) The "Request headers" field is currently a beta rolling out gradually; if your Add custom connector dialog does not show it, use the Claude Desktop (config file) tab instead until it appears for your account.', 'wsp-mcp-ai-agents-connector' ); ?>
+				<?php esc_html_e( '⚠ This site must be reachable on the public internet with a real domain and HTTPS — Claude\'s servers connect from their own cloud, not your computer, so they cannot reach localhost or a private network.', 'wsp-mcp-ai-agents-connector' ); ?>
+			</p>
+			<p class="wsp-desc" style="margin-top:10px;">
+				<?php esc_html_e( 'Whoever clicks Allow connects as themselves — Claude can then only do what that WordPress account is permitted to do, same as anywhere else on this site.', 'wsp-mcp-ai-agents-connector' ); ?>
+				<?php esc_html_e( 'Prefer the API key or Application Password instead? Use the Claude Desktop (config file) tab or the Configuration Generator above.', 'wsp-mcp-ai-agents-connector' ); ?>
 			</p>
 		</div>
 

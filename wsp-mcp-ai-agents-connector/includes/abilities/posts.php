@@ -40,7 +40,13 @@ function wsp_execute_create_post( $input ) {
 }
 
 function wsp_execute_update_post( $input ) {
-    $args = array( 'ID' => intval( $input['id'] ) );
+    $post = wsp_mcp_guard_edit_post( isset( $input['id'] ) ? $input['id'] : 0, 'post' );
+    if ( is_wp_error( $post ) ) return $post;
+    if ( isset( $input['status'] ) ) {
+        $status_check = wsp_mcp_guard_post_status( $post, $input['status'] );
+        if ( is_wp_error( $status_check ) ) return $status_check;
+    }
+    $args = array( 'ID' => $post->ID );
     if ( isset( $input['title'] ) )      $args['post_title']    = sanitize_text_field( wp_unslash( $input['title'] ) );
     if ( isset( $input['content'] ) )    $args['post_content']  = wp_kses_post( wp_unslash( $input['content'] ) );
     if ( isset( $input['status'] ) )     $args['post_status']   = sanitize_text_field( wp_unslash( $input['status'] ) );
@@ -52,7 +58,9 @@ function wsp_execute_update_post( $input ) {
 }
 
 function wsp_execute_delete_post( $input ) {
-    $id = intval( $input['id'] );
+    $post = wsp_mcp_guard_delete_post( isset( $input['id'] ) ? $input['id'] : 0, 'post' );
+    if ( is_wp_error( $post ) ) return $post;
+    $id = $post->ID;
     return wp_trash_post( $id )
         ? array( 'success' => true,  'message' => "Post {$id} moved to trash." )
         : array( 'success' => false, 'error'   => 'Could not trash post.' );
