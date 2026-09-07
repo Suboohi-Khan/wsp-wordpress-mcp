@@ -138,7 +138,6 @@ function wsp_mcp_enqueue_connection_assets() {
 					});
 				}
 				makeCopyBtn("wsp-copy-ccurl",       "wsp-code-ccurl");
-				makeCopyBtn("wsp-copy-claude",      "wsp-code-claude");
 				makeCopyBtn("wsp-copy-cursor",      "wsp-code-cursor");
 				makeCopyBtn("wsp-copy-codex",       "wsp-code-codex");
 				makeCopyBtn("wsp-copy-antigravity", "wsp-code-antigravity");
@@ -174,7 +173,6 @@ function wsp_mcp_enqueue_connection_assets() {
 						setTimeout(function(){ btn.innerHTML = orig; btn.style.color = ""; }, 2500);
 					});
 				}
-				makeDownloadBtn("wsp-download-claude",      "wsp-code-claude",      "claude_desktop_config.json");
 				makeDownloadBtn("wsp-download-cursor",      "wsp-code-cursor",      "mcp.json");
 				makeDownloadBtn("wsp-download-codex",       "wsp-code-codex",       "config.toml");
 				makeDownloadBtn("wsp-download-antigravity", "wsp-code-antigravity", "mcp_config.json");
@@ -387,20 +385,6 @@ function wsp_mcp_connection_page() {
 	$app_pw_url = admin_url( 'profile.php#application-passwords-section' );
 
 	// --- Build per-client snippets (API key embedded directly in the header). ---
-
-	// Claude Desktop (classic config file, offered as a fallback inside the
-	// Claude Connectors tab): stdio only -> mcp-remote bridge (requires Node.js).
-	$claude_json = wp_json_encode(
-		array(
-			'mcpServers' => array(
-				$conn => array(
-					'command' => 'npx',
-					'args'    => array( '-y', 'mcp-remote', $endpoint, '--header', 'Authorization: Bearer ' . $api_key ),
-				),
-			),
-		),
-		JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
-	);
 
 	// Cursor: native remote HTTP via url + headers (no Node.js).
 	$cursor_json = wp_json_encode(
@@ -649,27 +633,6 @@ function wsp_mcp_connection_page() {
 				<?php esc_html_e( 'Whoever clicks Allow connects as themselves — Claude can then only do what that WordPress account is permitted to do, same as anywhere else on this site.', 'wsp-mcp-ai-agents-connector' ); ?>
 				<?php esc_html_e( 'Prefer the API key or Application Password instead? Use the Configuration Generator above.', 'wsp-mcp-ai-agents-connector' ); ?>
 			</p>
-
-			<div class="wsp-config-box" style="margin-top:20px;">
-				<div class="wsp-instructions">
-					<p><span class="wsp-badge wsp-badge-node"><?php esc_html_e( 'Requires Node.js', 'wsp-mcp-ai-agents-connector' ); ?></span> <?php esc_html_e( "Don't have the OAuth Connectors screen yet, or prefer a config file? claude_desktop_config.json only supports local (stdio) servers, so this uses the mcp-remote bridge to reach the HTTP endpoint above.", 'wsp-mcp-ai-agents-connector' ); ?></p>
-					<p>1. <?php esc_html_e( 'Open', 'wsp-mcp-ai-agents-connector' ); ?> <strong>Settings &gt; Developer &gt; Edit Config</strong>, <?php esc_html_e( 'or edit', 'wsp-mcp-ai-agents-connector' ); ?> <code>claude_desktop_config.json</code> <?php esc_html_e( 'directly.', 'wsp-mcp-ai-agents-connector' ); ?></p>
-					<p>2. <?php esc_html_e( 'Paste the snippet below (merge into an existing', 'wsp-mcp-ai-agents-connector' ); ?> <code>mcpServers</code> <?php esc_html_e( 'block if you already have one).', 'wsp-mcp-ai-agents-connector' ); ?></p>
-					<p>3. <?php esc_html_e( 'Fully quit and reopen Claude Desktop so it re-reads the tool list.', 'wsp-mcp-ai-agents-connector' ); ?></p>
-				</div>
-				<div class="wsp-config-header">
-					<span class="wsp-config-title">claude_desktop_config.json</span>
-					<div class="wsp-config-actions">
-						<button type="button" class="wsp-copy-btn" id="wsp-download-claude" title="<?php esc_attr_e( 'Download this file directly — nothing to copy or paste', 'wsp-mcp-ai-agents-connector' ); ?>">
-							<span class="dashicons dashicons-download" style="font-size:16px;width:16px;height:16px;"></span> <?php esc_html_e( 'Download', 'wsp-mcp-ai-agents-connector' ); ?>
-						</button>
-						<button type="button" class="wsp-copy-btn" id="wsp-copy-claude">
-							<span class="dashicons dashicons-clipboard" style="font-size:16px;width:16px;height:16px;"></span> <?php esc_html_e( 'Copy', 'wsp-mcp-ai-agents-connector' ); ?>
-						</button>
-					</div>
-				</div>
-				<pre class="wsp-code-area" id="wsp-code-claude"><?php echo esc_html( $claude_json ); ?></pre>
-			</div>
 		</div>
 
 		<!-- Cursor -->
