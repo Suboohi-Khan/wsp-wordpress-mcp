@@ -11,7 +11,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2.7.1] — 2026-09-04
 
 ### Security — object-level capability checks on write tools (merged from upstream `bilalnaseer/wsp-wordpress-mcp`)
-- **Fixed a broken access control issue (reported by Patchstack).** `wsp/update-post`, `wsp/delete-post`,
+- **Fixed a broken access control issue reported by Patchstack (Ananda Dhakal): "Authenticated (Contributor+)
+  Broken Access Control", WSP MCP `<= 2.7.0`.** `wsp/update-post`, `wsp/delete-post`,
   `wsp/update-page`, `wsp/delete-page`, `wsp/update-media`, `wsp/delete-media`, and
   `wsp_execute_set_featured_image` previously checked only the broad primitive capability
   (`edit_posts` / `delete_posts`) before acting, not whether the caller could act on *that specific*
