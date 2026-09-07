@@ -225,7 +225,12 @@ class WSP_MCP_Server {
 		}
 
 		if ( is_wp_error( $result ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, $result->get_error_message(), self::elapsed_ms( $start ), $category );
+			// Object-level guards (guard.php, acf.php, yoast.php, rankmath.php, …)
+			// return WP_Error( 'forbidden', … ) when the caller lacks permission
+			// on the specific object — log those as authorization denials, not
+			// generic errors, so they surface correctly for security auditing.
+			$status = ( 'forbidden' === $result->get_error_code() ) ? WSP_MCP_Audit_Log::STATUS_DENIED : WSP_MCP_Audit_Log::STATUS_ERROR;
+			WSP_MCP_Audit_Log::log( $name, $status, $result->get_error_message(), self::elapsed_ms( $start ), $category );
 			return self::tool_text( $id, 'Error: ' . $result->get_error_message(), true );
 		}
 

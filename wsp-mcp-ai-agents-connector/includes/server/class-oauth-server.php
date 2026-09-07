@@ -36,6 +36,10 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 class WSP_MCP_OAuth_Server {
 
+	/** Token endpoint rate limit: max requests per IP within RATE_LIMIT_WINDOW seconds. */
+	const RATE_LIMIT_MAX    = 20;
+	const RATE_LIMIT_WINDOW = 60;
+
 	/** Register the early request-path dispatcher. */
 	public static function init() {
 		add_action( 'init', array( __CLASS__, 'maybe_dispatch' ), 0 );
@@ -161,6 +165,11 @@ class WSP_MCP_OAuth_Server {
 		if ( empty( $redirect_uris ) || count( $redirect_uris ) > 10 ) {
 			self::send_json( array( 'error' => 'invalid_redirect_uri', 'error_description' => 'At least one, at most ten, valid redirect_uris are required.' ), 400 );
 		}
+		// Canonicalize now (see canonicalize_redirect_uri()) and store the
+		// canonical form, so every later exact-match comparison — at the
+		// authorize and token endpoints — is comparing like with like instead
+		// of trusting whatever casing/port/userinfo variant showed up first.
+		$canonical_uris = array();
 		foreach ( $redirect_uris as $uri ) {
 			$scheme = wp_parse_url( $uri, PHP_URL_SCHEME );
 			$host   = wp_parse_url( $uri, PHP_URL_HOST );
@@ -169,7 +178,13 @@ class WSP_MCP_OAuth_Server {
 			if ( ! $is_https && ! $is_loopback ) {
 				self::send_json( array( 'error' => 'invalid_redirect_uri', 'error_description' => 'redirect_uris must be HTTPS (loopback http://localhost is also accepted).' ), 400 );
 			}
+			$canonical = self::canonicalize_redirect_uri( $uri );
+			if ( null === $canonical ) {
+				self::send_json( array( 'error' => 'invalid_redirect_uri', 'error_description' => 'redirect_uris must not contain userinfo (user:pass@) or a fragment.' ), 400 );
+			}
+			$canonical_uris[] = $canonical;
 		}
+		$redirect_uris = array_values( array_unique( $canonical_uris ) );
 
 		$client_name = isset( $body['client_name'] ) ? sanitize_text_field( wp_unslash( $body['client_name'] ) ) : 'MCP client';
 		$client_name = mb_substr( $client_name, 0, 255 );
@@ -203,19 +218,50 @@ class WSP_MCP_OAuth_Server {
 
 		$client = $client_id ? WSP_MCP_OAuth_Store::get_client( $client_id ) : null;
 
+		// Canonicalize both sides before comparing — see canonicalize_redirect_uri().
+		// Registered URIs are stored canonical already (handle_register()), but
+		// re-canonicalizing here is idempotent and also covers any rows written
+		// before this check existed, with no migration needed.
+		$redirect_uri_canonical = ( '' !== $redirect_uri ) ? self::canonicalize_redirect_uri( $redirect_uri ) : null;
+		$registered_canonical   = $client ? array_filter( array_map( array( __CLASS__, 'canonicalize_redirect_uri' ), $client['redirect_uris'] ) ) : array();
+
 		// Everything up to and including the redirect_uri match must be verified
 		// BEFORE we ever redirect anywhere — an unvalidated redirect_uri is a
 		// classic OAuth open-redirect vulnerability, so failures here render a
 		// plain error page instead of bouncing the browser anywhere.
-		if ( ! $client || ! in_array( $redirect_uri, $client['redirect_uris'], true ) ) {
+		if ( ! $client || null === $redirect_uri_canonical || ! in_array( $redirect_uri_canonical, $registered_canonical, true ) ) {
 			self::render_error_page( 'This connector is not registered, or its redirect address does not match what was registered.' );
 		}
+		// From here on, use the canonical form exclusively — it's the value
+		// that was actually matched against the registered allowlist.
+		$redirect_uri = $redirect_uri_canonical;
+
 		if ( 'code' !== $response_type ) {
 			self::redirect_with_error( $redirect_uri, $state, 'unsupported_response_type' );
 		}
-		if ( '' === $challenge || 'S256' !== $challenge_m ) {
-			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'PKCE (code_challenge with S256) is required.' );
+		// A missing state leaves nothing binding the callback back to the
+		// browser session that started this request, which is what makes
+		// login CSRF against the OAuth flow possible in the first place —
+		// PKCE alone protects the token exchange, not this redirect step.
+		if ( '' === $state || mb_strlen( $state ) > 512 ) {
+			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'A state parameter is required.' );
 		}
+		// RFC 7636: an S256 code_challenge is always the unpadded base64url
+		// encoding of a 32-byte SHA-256 digest — exactly 43 characters from
+		// [A-Za-z0-9-_]. Reject anything else outright rather than storing an
+		// unvalidated value that would only ever fail (or be abused) later at
+		// the token endpoint.
+		if ( '' === $challenge || 'S256' !== $challenge_m || ! preg_match( '/^[A-Za-z0-9\-_]{43}$/', $challenge ) ) {
+			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'PKCE code_challenge must be a 43-character S256 (base64url) value.' );
+		}
+		// Reject anything outside the server's advertised scopes_supported
+		// (see authorization_server_metadata()) instead of silently issuing a
+		// token for whatever string the client happened to send.
+		$validated_scope = self::validate_scope( $scope );
+		if ( null === $validated_scope ) {
+			self::redirect_with_error( $redirect_uri, $state, 'invalid_scope' );
+		}
+		$scope = $validated_scope;
 
 		// Not logged in yet: send to WordPress's own login screen and come right
 		// back here with the exact same query string once authenticated. Reuses
@@ -313,6 +359,59 @@ class WSP_MCP_OAuth_Server {
 		exit;
 	}
 
+	/**
+	 * Canonicalize a redirect_uri for reliable exact-match comparison against
+	 * the client's registered allowlist. Lowercases scheme/host, drops a
+	 * redundant default port, and — crucially — refuses (returns null) any
+	 * URI carrying userinfo (`user:pass@host`) or a fragment, since both are
+	 * classic tricks for making two URIs look equal to a naive parser while
+	 * actually pointing (or appearing to point, to a phishing victim) somewhere
+	 * else. Path and query are left byte-for-byte as-is; per RFC 3986 they are
+	 * case-sensitive and not safe to normalize.
+	 *
+	 * @param string $uri Raw redirect_uri.
+	 * @return string|null Canonical form, or null if structurally invalid/unsafe.
+	 */
+	private static function canonicalize_redirect_uri( $uri ) {
+		$parts = wp_parse_url( (string) $uri );
+		if ( ! is_array( $parts ) || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+			return null;
+		}
+		if ( ! empty( $parts['user'] ) || ! empty( $parts['fragment'] ) ) {
+			return null;
+		}
+		$scheme       = strtolower( $parts['scheme'] );
+		$host         = strtolower( $parts['host'] );
+		$port         = isset( $parts['port'] ) ? (int) $parts['port'] : 0;
+		$default_port = ( 'https' === $scheme ) ? 443 : ( ( 'http' === $scheme ) ? 80 : 0 );
+		$authority    = $host . ( ( $port && $port !== $default_port ) ? ':' . $port : '' );
+		$path         = isset( $parts['path'] ) ? $parts['path'] : '';
+		$query        = isset( $parts['query'] ) ? '?' . $parts['query'] : '';
+		return $scheme . '://' . $authority . $path . $query;
+	}
+
+	/**
+	 * Validate a requested (space-separated) scope string against this
+	 * server's supported scopes (see authorization_server_metadata()).
+	 *
+	 * @param string $scope_raw Raw scope string from the request.
+	 * @return string|null Normalized, deduplicated scope string, or null if
+	 *                      any requested scope isn't supported.
+	 */
+	private static function validate_scope( $scope_raw ) {
+		$allowed   = array( 'mcp', 'offline_access' );
+		$requested = array_values( array_filter( explode( ' ', trim( (string) $scope_raw ) ), 'strlen' ) );
+		if ( empty( $requested ) ) {
+			return 'mcp';
+		}
+		foreach ( $requested as $s ) {
+			if ( ! in_array( $s, $allowed, true ) ) {
+				return null;
+			}
+		}
+		return implode( ' ', array_unique( $requested ) );
+	}
+
 	private static function render_error_page( $message ) {
 		nocache_headers();
 		status_header( 400 );
@@ -343,6 +442,11 @@ class WSP_MCP_OAuth_Server {
 	/* ---------- Token endpoint (RFC 6749 + PKCE) ---------- */
 
 	private static function handle_token() {
+		// Brute-forcing a PKCE verifier or refresh token is an offline-guessing
+		// attack made online only by this endpoint — throttle per source IP
+		// before doing any real work, regardless of which grant is requested.
+		self::enforce_rate_limit();
+
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- token endpoint is a machine-to-machine OAuth grant exchange, authenticated by the authorization code / refresh token itself, not a WP nonce.
 		$grant_type = isset( $_POST['grant_type'] ) ? sanitize_text_field( wp_unslash( $_POST['grant_type'] ) ) : '';
 
@@ -365,9 +469,22 @@ class WSP_MCP_OAuth_Server {
 		if ( '' === $code || '' === $code_verifier ) {
 			self::send_json( array( 'error' => 'invalid_request' ), 400 );
 		}
+		// RFC 7636 §4.1: code_verifier must be 43-128 characters from the
+		// unreserved character set. Reject malformed values before touching
+		// the store, rather than letting them fall through to a generic PKCE
+		// mismatch.
+		if ( ! preg_match( '/^[A-Za-z0-9\-._~]{43,128}$/', $code_verifier ) ) {
+			self::send_json( array( 'error' => 'invalid_request', 'error_description' => 'code_verifier must be 43-128 characters from the unreserved character set.' ), 400 );
+		}
+
+		// The code was stored against the canonical redirect_uri (see
+		// handle_authorize()) — canonicalize the one presented here the same
+		// way before comparing, so equivalent-but-differently-formatted URIs
+		// (case, default port, etc.) don't spuriously fail this check.
+		$redirect_uri_canonical = ( '' !== $redirect_uri ) ? self::canonicalize_redirect_uri( $redirect_uri ) : null;
 
 		$row = WSP_MCP_OAuth_Store::consume_code( $code );
-		if ( ! $row || $row['client_id'] !== $client_id || $row['redirect_uri'] !== $redirect_uri ) {
+		if ( ! $row || $row['client_id'] !== $client_id || null === $redirect_uri_canonical || $row['redirect_uri'] !== $redirect_uri_canonical ) {
 			self::send_json( array( 'error' => 'invalid_grant' ), 400 );
 		}
 		if ( ! self::pkce_matches( $code_verifier, $row['code_challenge'] ) ) {
@@ -407,6 +524,52 @@ class WSP_MCP_OAuth_Server {
 			'refresh_token' => $fresh['refresh_token'],
 			'scope'         => $fresh['scope'],
 		) );
+	}
+
+	/**
+	 * Throttle the token endpoint per source IP using a transient counter.
+	 * Sends a 429 (with Retry-After) and exits once the caller has made more
+	 * than RATE_LIMIT_MAX requests within the RATE_LIMIT_WINDOW.
+	 *
+	 * Fails open (no throttling) only when the IP genuinely cannot be
+	 * determined, so this can never wedge every client behind one shared
+	 * proxy IP into indefinitely rejecting everyone else — see client_ip().
+	 */
+	private static function enforce_rate_limit() {
+		$ip = self::client_ip();
+		if ( '' === $ip ) {
+			return;
+		}
+		$key   = 'wsp_mcp_oauth_rl_' . md5( $ip );
+		$count = (int) get_transient( $key );
+		if ( $count >= self::RATE_LIMIT_MAX ) {
+			nocache_headers();
+			header( 'Retry-After: ' . self::RATE_LIMIT_WINDOW );
+			self::send_json( array( 'error' => 'slow_down', 'error_description' => 'Too many requests. Please retry later.' ), 429 );
+		}
+		// First hit in the window sets the TTL; later hits just increment,
+		// so the window doesn't keep sliding forward on every request.
+		if ( 0 === $count ) {
+			set_transient( $key, 1, self::RATE_LIMIT_WINDOW );
+		} else {
+			set_transient( $key, $count + 1, self::RATE_LIMIT_WINDOW );
+		}
+	}
+
+	/**
+	 * Best-effort client IP for rate limiting. Only the direct connection
+	 * (REMOTE_ADDR) is trusted — proxy headers (X-Forwarded-For, etc.) are
+	 * attacker-controlled and would let an attacker spoof a fresh IP on every
+	 * request to bypass the limiter entirely.
+	 *
+	 * @return string A validated IPv4/IPv6 address, or '' if unavailable.
+	 */
+	private static function client_ip() {
+		if ( empty( $_SERVER['REMOTE_ADDR'] ) ) {
+			return '';
+		}
+		$ip = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) );
+		return filter_var( $ip, FILTER_VALIDATE_IP ) ? $ip : '';
 	}
 
 	/** RFC 7636 S256 PKCE verification. */
