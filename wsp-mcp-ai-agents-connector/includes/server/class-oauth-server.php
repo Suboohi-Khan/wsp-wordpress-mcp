@@ -36,8 +36,16 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 class WSP_MCP_OAuth_Server {
 
-	/** Token endpoint rate limit: max requests per IP within RATE_LIMIT_WINDOW seconds. */
-	const RATE_LIMIT_MAX    = 20;
+	/**
+	 * Token endpoint rate limit: max requests per IP within RATE_LIMIT_WINDOW
+	 * seconds. Anthropic's OAuth traffic for every Connector on every site
+	 * originates from one shared egress range (160.79.104.0/21 per Claude's
+	 * docs), not per-end-user IPs, so this has to stay generous enough that
+	 * normal connect/retry activity across unrelated users never trips it —
+	 * PKCE (S256, enforced on every request) is what actually makes a code
+	 * or verifier infeasible to brute-force, this is only a coarse backstop.
+	 */
+	const RATE_LIMIT_MAX    = 60;
 	const RATE_LIMIT_WINDOW = 60;
 
 	/** Register the early request-path dispatcher. */
@@ -239,29 +247,28 @@ class WSP_MCP_OAuth_Server {
 		if ( 'code' !== $response_type ) {
 			self::redirect_with_error( $redirect_uri, $state, 'unsupported_response_type' );
 		}
-		// A missing state leaves nothing binding the callback back to the
-		// browser session that started this request, which is what makes
-		// login CSRF against the OAuth flow possible in the first place —
-		// PKCE alone protects the token exchange, not this redirect step.
-		if ( '' === $state || mb_strlen( $state ) > 512 ) {
-			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'A state parameter is required.' );
+		// state is client-optional under OAuth 2.1: PKCE (required above, and
+		// enforced on every request Claude makes) already binds the callback
+		// to the browser session that started it, so a public client isn't
+		// required to also send state for CSRF protection. Cap the length
+		// only to stop an absurdly long value being reflected back verbatim.
+		if ( mb_strlen( $state ) > 512 ) {
+			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'state is too long.' );
 		}
-		// RFC 7636: an S256 code_challenge is always the unpadded base64url
-		// encoding of a 32-byte SHA-256 digest — exactly 43 characters from
-		// [A-Za-z0-9-_]. Reject anything else outright rather than storing an
-		// unvalidated value that would only ever fail (or be abused) later at
-		// the token endpoint.
-		if ( '' === $challenge || 'S256' !== $challenge_m || ! preg_match( '/^[A-Za-z0-9\-_]{43}$/', $challenge ) ) {
-			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'PKCE code_challenge must be a 43-character S256 (base64url) value.' );
+		// RFC 7636 §4.2: code_challenge is 43-128 characters of base64url
+		// (unpadded). A standard S256-of-SHA256 digest is always exactly 43,
+		// but the spec's own bound is the range below — match that rather
+		// than a narrower assumption that would reject an otherwise-valid
+		// value from a conformant client.
+		if ( '' === $challenge || 'S256' !== $challenge_m || ! preg_match( '/^[A-Za-z0-9\-_]{43,128}$/', $challenge ) ) {
+			self::redirect_with_error( $redirect_uri, $state, 'invalid_request', 'PKCE code_challenge must be a 43-128 character S256 (base64url) value.' );
 		}
-		// Reject anything outside the server's advertised scopes_supported
-		// (see authorization_server_metadata()) instead of silently issuing a
-		// token for whatever string the client happened to send.
-		$validated_scope = self::validate_scope( $scope );
-		if ( null === $validated_scope ) {
-			self::redirect_with_error( $redirect_uri, $state, 'invalid_scope' );
-		}
-		$scope = $validated_scope;
+		// Narrow the requested scope to what this server actually advertises
+		// (see authorization_server_metadata()) rather than granting an
+		// unrecognized one — but never fail the whole authorization over it;
+		// RFC 6749 §3.3 explicitly allows an AS to grant a scope narrower
+		// than what was requested instead of erroring the grant.
+		$scope = self::validate_scope( $scope );
 
 		// Not logged in yet: send to WordPress's own login screen and come right
 		// back here with the exact same query string once authenticated. Reuses
@@ -272,6 +279,7 @@ class WSP_MCP_OAuth_Server {
 		if ( ! is_user_logged_in() ) {
 			$current_request = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/wsp-mcp-oauth/authorize'; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 			$return_to = self::issuer() . $current_request;
+			nocache_headers();
 			wp_safe_redirect( wp_login_url( $return_to ) );
 			exit;
 		}
@@ -293,6 +301,13 @@ class WSP_MCP_OAuth_Server {
 				$scope
 			);
 			$target = add_query_arg( array( 'code' => $code, 'state' => $state ), $redirect_uri );
+			// This response carries a single-use authorization code in its
+			// Location header — it must never be cached (by a CDN/WAF such as
+			// Cloudflare, a page-cache plugin, or a shared proxy), or every
+			// request that ever hits a cached copy would replay the same
+			// already-consumed code and fail token exchange with invalid_grant,
+			// no matter who's connecting or when.
+			nocache_headers();
 			// wp_redirect(), not wp_safe_redirect(): the target is the client's own
 			// callback (e.g. https://claude.ai/api/mcp/auth_callback), a different
 			// host by design — wp_safe_redirect() would block it as "unsafe". The
@@ -391,25 +406,20 @@ class WSP_MCP_OAuth_Server {
 	}
 
 	/**
-	 * Validate a requested (space-separated) scope string against this
-	 * server's supported scopes (see authorization_server_metadata()).
+	 * Narrow a requested (space-separated) scope string to this server's
+	 * supported scopes (see authorization_server_metadata()). Never fails —
+	 * an unrecognized requested scope is simply dropped rather than causing
+	 * the whole authorization to be rejected, per RFC 6749 §3.3.
 	 *
 	 * @param string $scope_raw Raw scope string from the request.
-	 * @return string|null Normalized, deduplicated scope string, or null if
-	 *                      any requested scope isn't supported.
+	 * @return string Normalized, deduplicated, supported-only scope string
+	 *                (falls back to 'mcp' if nothing requested matched).
 	 */
 	private static function validate_scope( $scope_raw ) {
 		$allowed   = array( 'mcp', 'offline_access' );
 		$requested = array_values( array_filter( explode( ' ', trim( (string) $scope_raw ) ), 'strlen' ) );
-		if ( empty( $requested ) ) {
-			return 'mcp';
-		}
-		foreach ( $requested as $s ) {
-			if ( ! in_array( $s, $allowed, true ) ) {
-				return null;
-			}
-		}
-		return implode( ' ', array_unique( $requested ) );
+		$granted   = array_values( array_intersect( array_unique( $requested ), $allowed ) );
+		return empty( $granted ) ? 'mcp' : implode( ' ', $granted );
 	}
 
 	private static function render_error_page( $message ) {
@@ -435,6 +445,7 @@ class WSP_MCP_OAuth_Server {
 		if ( $description ) {
 			$args['error_description'] = $description;
 		}
+		nocache_headers();
 		wp_redirect( add_query_arg( $args, $redirect_uri ) ); // phpcs:ignore WordPress.Security.SafeRedirect
 		exit;
 	}
