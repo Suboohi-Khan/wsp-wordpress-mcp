@@ -8,6 +8,43 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.7.2] — 2026-09-09
+
+### Fixed — OAuth discovery on subdirectory installs ("connector has no tools available")
+
+- **A WordPress install in a subdirectory (`https://example.com/test/`) could complete the Claude
+  Connector OAuth flow and then fail every MCP call.** Claude showed the connector as connected,
+  with *"This connector has no tools available."*
+- **Cause.** The 401 challenge advertised `resource_metadata` at the bare origin
+  (`https://example.com/.well-known/oauth-protected-resource`), and both discovery documents were
+  only served at that origin-root path. A subdirectory install never receives origin-root requests —
+  the web server routes them to the document root, not to `/test/index.php`. Claude therefore read
+  whatever else owned the document root (a static file, or a *second* WordPress install running this
+  same plugin), ran the whole authorization-code exchange against **that** server, and presented the
+  resulting token — minted from that other database — to `/test/`, which rejected it with 401 on
+  `initialize` and `tools/list`.
+- `protected_resource_metadata_url()` is now `home_url()`-relative, so the one pointer a client
+  follows verbatim (RFC 9728 §5.1) always names a URL this install can actually serve.
+- New `WSP_MCP_OAuth_Server::as_issuer()` — origin **plus** `home_url()`'s base path — is now the
+  `issuer` in the authorization-server metadata and the entry in `authorization_servers`. Two installs
+  on one domain (`/mcp` and `/test`) are now distinct authorization servers instead of both claiming
+  the bare origin. On a root install it is byte-identical to `issuer()`, so nothing changes there.
+  `issuer()` itself is unchanged and still used to rebuild an absolute URL from `REQUEST_URI` (the
+  login round-trip in `handle_authorize()`), where adding the base path would double it.
+- `maybe_dispatch()` now serves each discovery document at every spelling this install can reach:
+  the origin root (root installs), the base-path form (`/test/.well-known/…`), the RFC 9728 §3.1
+  path-inserted form derived from `rest_url()` (so a non-default REST prefix still matches), and — on
+  a subdirectory install only — `{base}/.well-known/openid-configuration`, which is the one variant
+  the MCP authorization spec's fallback chain both tries and can reach there. The origin-root
+  `openid-configuration` path is deliberately **not** claimed, so a root-level OpenID provider on the
+  same domain is left alone.
+
+**Upgrade note.** If you previously worked around this by hand-placing a static
+`.well-known/oauth-protected-resource` file in the domain's document root, delete it and reconnect —
+it will otherwise keep pointing every connector on the domain at whichever install it names.
+
+---
+
 ## [2.7.1] — 2026-09-04
 
 ### Security — object-level capability checks on write tools (merged from upstream `bilalnaseer/wsp-wordpress-mcp`)

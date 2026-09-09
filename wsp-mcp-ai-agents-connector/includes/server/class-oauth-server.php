@@ -10,8 +10,9 @@
  *
  * Every endpoint here is matched against the raw request path on the `init`
  * hook rather than through the REST API or WordPress rewrite rules, for two
- * reasons: the two `.well-known/*` discovery documents MUST live at the site
- * *root* regardless of any REST namespace, and the token endpoint must accept
+ * reasons: the two `.well-known/*` discovery documents must sit outside any
+ * REST namespace (and are served at every path spelling this install can
+ * reach — see maybe_dispatch()), and the token endpoint must accept
  * `application/x-www-form-urlencoded` bodies (PHP already populates $_POST
  * for that content type) rather than the REST API's JSON-only body parsing.
  * This mirrors the "match once, exit early" pattern already used by plugins
@@ -53,7 +54,11 @@ class WSP_MCP_OAuth_Server {
 		add_action( 'init', array( __CLASS__, 'maybe_dispatch' ), 0 );
 	}
 
-	/** @return string Scheme + host (+ non-default port) — no path. The OAuth issuer identity. */
+	/**
+	 * @return string Scheme + host (+ non-default port) — no path. The site
+	 * origin, used to turn a raw REQUEST_URI back into an absolute URL. For the
+	 * OAuth issuer *identifier* use as_issuer(), which includes the base path.
+	 */
 	public static function issuer() {
 		$scheme = wp_parse_url( home_url(), PHP_URL_SCHEME );
 		$host   = wp_parse_url( home_url(), PHP_URL_HOST );
@@ -65,17 +70,50 @@ class WSP_MCP_OAuth_Server {
 		return $base;
 	}
 
-	/** @return string The protected-resource metadata URL (used in the 401 WWW-Authenticate header). */
+	/**
+	 * The OAuth issuer identifier for *this* install — origin plus home_url()'s
+	 * base path, so two WordPress installs on one domain (e.g. /mcp and /test)
+	 * are distinct authorization servers rather than both claiming the bare
+	 * origin. On a root install this is byte-identical to issuer(), so nothing
+	 * changes for the common case; on a subdirectory install it is what makes
+	 * discovery resolve to the install the client is actually talking to.
+	 *
+	 * @return string Issuer identifier, no trailing slash.
+	 */
+	public static function as_issuer() {
+		return untrailingslashit( home_url() );
+	}
+
+	/**
+	 * The protected-resource metadata URL, used in the 401 WWW-Authenticate
+	 * header — the one pointer a client is guaranteed to follow verbatim
+	 * (RFC 9728 §5.1), which is why it must name a URL *this* install can
+	 * actually serve.
+	 *
+	 * It is deliberately home_url()-relative, not issuer()-relative. RFC 9728's
+	 * well-known URI is anchored at the bare origin, but a WordPress install in
+	 * a subdirectory never receives origin-root requests at all — Apache/nginx
+	 * routes `https://example.com/.well-known/...` to the document root, not to
+	 * `/test/index.php`. Advertising the origin-root URL from a subdirectory
+	 * install therefore hands the client whatever else happens to own the
+	 * document root (a static file, or another WordPress install running this
+	 * same plugin). The client then completes OAuth against *that* server,
+	 * receives a token minted from *that* database, presents it here, and gets
+	 * 401 on every call — which Claude surfaces as a connector that is
+	 * "connected" but has no tools available.
+	 *
+	 * @return string Absolute URL of this install's protected-resource metadata.
+	 */
 	public static function protected_resource_metadata_url() {
-		return self::issuer() . '/.well-known/oauth-protected-resource';
+		return home_url( '/.well-known/oauth-protected-resource' );
 	}
 
 	/**
 	 * @return string home_url()'s own path component, no trailing slash ('' for a
 	 * root install, e.g. '/mcp' for a site whose WordPress Address has a base path).
-	 * Only the two .well-known/* documents are spec-mandated to sit at the bare
-	 * site root; authorize/token/register deliberately live *under* this base path
-	 * instead, because WordPress's auth cookies are scoped to it (SITECOOKIEPATH) —
+	 * The .well-known/* documents are served both here and (for a root install) at
+	 * the bare origin; authorize/token/register live *only* under this base path,
+	 * because WordPress's auth cookies are scoped to it (SITECOOKIEPATH) —
 	 * putting the login-dependent /authorize endpoint outside that scope would make
 	 * is_user_logged_in() invisible to it after login and loop forever.
 	 */
@@ -102,15 +140,50 @@ class WSP_MCP_OAuth_Server {
 
 		$base = self::base_path();
 
+		// Discovery documents are matched against a list rather than a switch
+		// because a root install ($base === '') collapses the base-path variants
+		// onto the origin-root ones, and every client spells the lookup slightly
+		// differently. Serving all the spellings this install can actually reach
+		// costs one string comparison and removes a whole class of "connected but
+		// no tools" failures — see protected_resource_metadata_url().
+		//
+		// The origin-root forms only ever arrive on a root install (a
+		// subdirectory install never receives them), so listing both is safe.
+
+		// Derived from rest_url() rather than hardcoded, so the path-insertion
+		// form still matches when the REST prefix isn't the default `wp-json`.
+		$resource_path = wp_parse_url( rest_url( 'wsp-mcp/v1/mcp' ), PHP_URL_PATH );
+		$resource_path = is_string( $resource_path ) ? untrailingslashit( $resource_path ) : '';
+
+		$resource_paths = array(
+			'/.well-known/oauth-protected-resource',                    // RFC 9728, origin root.
+			$base . '/.well-known/oauth-protected-resource',            // Reachable from a subdirectory install.
+			'/.well-known/oauth-protected-resource' . $resource_path,   // RFC 9728 §3.1 path insertion.
+		);
+		$as_paths = array(
+			'/.well-known/oauth-authorization-server',          // RFC 8414, origin root.
+			$base . '/.well-known/oauth-authorization-server',  // RFC 8414 path appending.
+		);
+		if ( '' !== $base ) {
+			// The MCP authorization spec has clients fall back to OpenID Connect
+			// Discovery *with path appending* for an issuer that carries a path —
+			// which, on a subdirectory install, is the only variant that is both
+			// tried by the client and reachable by us. The document we return is
+			// OAuth AS metadata rather than a full OIDC one (no jwks_uri: this
+			// server issues opaque tokens, not JWTs); that is what the client is
+			// looking for here, and it is deliberately scoped to our own base path
+			// so a root-level OpenID provider on the same domain is left alone.
+			$as_paths[] = $base . '/.well-known/openid-configuration';
+		}
+
+		if ( in_array( $path, $resource_paths, true ) ) {
+			self::send_json( self::protected_resource_metadata() ); // Exits.
+		}
+		if ( in_array( $path, $as_paths, true ) ) {
+			self::send_json( self::authorization_server_metadata() ); // Exits.
+		}
+
 		switch ( $path ) {
-			case '/.well-known/oauth-protected-resource':
-				self::send_json( self::protected_resource_metadata() );
-				break; // send_json() exits.
-
-			case '/.well-known/oauth-authorization-server':
-				self::send_json( self::authorization_server_metadata() );
-				break;
-
 			case $base . '/wsp-mcp-oauth/register':
 				if ( 'POST' !== $method ) {
 					self::send_json( array( 'error' => 'invalid_request' ), 405 );
@@ -136,13 +209,17 @@ class WSP_MCP_OAuth_Server {
 	private static function protected_resource_metadata() {
 		return array(
 			'resource'              => esc_url_raw( rest_url( 'wsp-mcp/v1/mcp' ) ),
-			'authorization_servers' => array( self::issuer() ),
+			// as_issuer(), not issuer(): on a subdirectory install the bare
+			// origin is a *different* authorization server (possibly another
+			// site running this same plugin), and a token minted there will
+			// never validate against this install's token store.
+			'authorization_servers' => array( self::as_issuer() ),
 			'scopes_supported'      => array( 'mcp' ),
 		);
 	}
 
 	private static function authorization_server_metadata() {
-		$issuer = self::issuer();
+		$issuer = self::as_issuer();
 		return array(
 			'issuer'                                => $issuer,
 			// Deliberately home_url()-relative, not issuer()-relative — see base_path().
