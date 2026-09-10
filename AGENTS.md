@@ -31,7 +31,7 @@ These three files give you complete project understanding without touching the c
 ## What this plugin is
 
 **Plugin Name:** WSP MCP - AI Agents Connector  
-**Version:** 2.7.1
+**Version:** 2.7.3
 **Slug/prefix:** `wsp`  
 **WP option key:** `wsp_mcp_abilities`  
 **Constant prefix:** `WSP_MCP_`
@@ -52,6 +52,24 @@ This is a WordPress plugin that exposes WordPress content to AI agents (Claude, 
 enforced inside the handler). Speaks Streamable HTTP + JSON-RPC 2.0: `initialize` (echoes the
 client's `protocolVersion` if recognized; supported = `2024-11-05`/`2025-03-26`/`2025-06-18`/`2025-11-25`),
 `notifications/initialized`, `tools/list`, `tools/call`, `ping`, empty `resources/list` & `prompts/list`.
+
+**`includes/response-guard.php` (v2.7.3, required before every other include):** a site running
+this plugin can have any number of *other* plugins active, of any quality — this plugin can't
+control that. `wsp_mcp_output_guard_start()` opens an output buffer the instant this file is
+`require`d (top of the main plugin file, before anything else loads) whenever
+`wsp_mcp_is_own_endpoint_request()` says the raw request URI is this plugin's own MCP REST route or
+one of the OAuth discovery/registration/authorize/token endpoints — a no-op on every other request.
+`wsp_mcp_output_guard_flush()` discards just that one buffer level right before the real response is
+sent, so a stray PHP notice/warning some other plugin printed during `init`/`wp_loaded`/etc. can
+never land in front of the JSON body (which breaks every MCP client's JSON parser and surfaces in
+Claude as "connected" with "no tools available") and never causes a "headers already sent" warning
+on this plugin's own `header()` calls. Wired at exactly two choke points: `WSP_MCP_Server`'s
+`rest_pre_echo_response` filter (covers every JSON-RPC response, since all of them are
+`WP_REST_Response` objects — including the 401 challenge in `class-auth.php`) and
+`WSP_MCP_OAuth_Server::send_json()` (the single function every OAuth JSON response goes through).
+Cannot catch output printed before this plugin's own file is included — there is no earlier hook a
+regular (non-mu) plugin has — but that covers the rare case; everything from `plugins_loaded` onward,
+where real-world stray output actually happens, is covered.
 
 **Server-layer files (`includes/server/`):**
 - `class-mcp-server.php` — `WSP_MCP_Server`: REST route, JSON-RPC dispatch, in-memory tool
@@ -171,6 +189,10 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
     ├── readme.txt              ← WP.org readme (v2.0)
     ├── uninstall.php           ← deletes wsp_mcp_* options + drops sessions table
     └── includes/
+        ├── response-guard.php  ← output-buffer guard (v2.7.3): swallows stray output from other
+        │                          active plugins/themes on this plugin's own MCP/OAuth requests so
+        │                          it can never corrupt the JSON response — required first, started
+        │                          before any other include
         ├── dependency.php      ← stub: wsp_mcp_transport_available() (always true) — kept for back-compat
         ├── registry.php        ← central ability registry + settings helpers
         ├── server/             ← v2.0 native MCP server
@@ -197,7 +219,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
 
 | Constant | Value |
 |---|---|
-| `WSP_MCP_VERSION` | `'2.7.1'` |
+| `WSP_MCP_VERSION` | `'2.7.3'` |
 | `WSP_MCP_OPTION` | `'wsp_mcp_abilities'` (per-ability on/off toggles) |
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 

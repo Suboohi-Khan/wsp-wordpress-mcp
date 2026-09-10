@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.7.1
+Stable tag: 2.7.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -148,6 +148,12 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.7.3 =
+* Fixed: On a site with other active plugins (however many, of whatever quality), a stray PHP notice/warning printed by one of them during an ordinary WordPress hook could land in front of this plugin's JSON response and break every MCP client's JSON parser — Claude showed the connector as connected but with "no tools available," and it could also trigger a "headers already sent" warning on this plugin's own responses. A new output-buffer guard opens the instant this plugin's own MCP or OAuth endpoint is requested and discards any such stray output right before the real JSON is sent, regardless of what else is installed on the site.
+
+= 2.7.2 =
+* Fixed: OAuth discovery on subdirectory installs (e.g. `https://example.com/test/`) could leave a connected connector with "no tools available." Discovery documents are now served at every URL spelling this install can actually reach, and the two-install-on-one-domain case is disambiguated with a base-path-aware issuer identity.
 
 = 2.7.1 =
 * Security: Fixed a broken access control issue reported by Patchstack (Ananda Dhakal) as "Authenticated (Contributor+) Broken Access Control", affecting WSP MCP <= 2.7.0, where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. New shared helper file `includes/abilities/guard.php`. Merged from the upstream project.

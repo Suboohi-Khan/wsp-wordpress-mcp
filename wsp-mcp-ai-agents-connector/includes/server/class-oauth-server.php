@@ -673,6 +673,11 @@ class WSP_MCP_OAuth_Server {
 	/* ---------- Response helper ---------- */
 
 	private static function send_json( array $data, $status = 200 ) {
+		// Discards any stray output another active plugin/theme printed
+		// earlier on this request (see includes/response-guard.php) so it
+		// can never precede the JSON body below, and so the header() calls
+		// right above never hit "headers already sent" because of it.
+		wsp_mcp_output_guard_flush();
 		nocache_headers();
 		status_header( $status );
 		header( 'Content-Type: application/json; charset=utf-8' );

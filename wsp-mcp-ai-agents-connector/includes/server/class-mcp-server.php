@@ -30,6 +30,17 @@ class WSP_MCP_Server {
 	public static function init() {
 		wsp_mcp_register_native_tools();
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
+		// Discards any stray output another active plugin/theme printed during
+		// this request (see includes/response-guard.php) the instant before WP
+		// core echoes the real JSON-RPC body — a no-op on every REST response
+		// that isn't ours, so this is safe to leave unconditional site-wide.
+		add_filter( 'rest_pre_echo_response', array( __CLASS__, 'flush_output_guard' ) );
+	}
+
+	/** @see wsp_mcp_output_guard_flush() */
+	public static function flush_output_guard( $result ) {
+		wsp_mcp_output_guard_flush();
+		return $result;
 	}
 
 	/**

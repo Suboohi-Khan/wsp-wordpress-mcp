@@ -8,6 +8,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.7.3] — 2026-09-10
+
+### Fixed — stray output from other plugins/themes could corrupt the JSON response ("no tools available")
+
+- **A site can have any number of other plugins active, of any quality — this plugin has no
+  control over that, and never should have assumed it.** If any one of them printed a PHP
+  notice/warning/deprecation string directly to output during an ordinary WordPress hook
+  (`init`, `wp_loaded`, `rest_api_init`, a template part, …) on a request this plugin was about to
+  answer with strict JSON, that stray text landed in front of the JSON body. Every MCP client's JSON
+  parser then failed on the response — Claude showed the connector as connected, with *"This
+  connector has no tools available,"* indistinguishable from an actual bug in this plugin. The same
+  stray output could also trigger PHP's "headers already sent" warning on this plugin's own
+  `header()` calls (the 401 challenge, the OAuth discovery documents, the token endpoint, …).
+- **New file `includes/response-guard.php`**, required — and its `wsp_mcp_output_guard_start()`
+  called — before any other include in the main plugin file, so it is the earliest this plugin's own
+  bootstrap can act. `wsp_mcp_is_own_endpoint_request()` checks the raw request URI for this plugin's
+  MCP REST route or its OAuth discovery/registration/authorize/token endpoints (a handful of
+  `strpos()` calls, since this runs on every request to the site); when it matches, an output buffer
+  opens immediately. `wsp_mcp_output_guard_flush()` discards exactly that one buffer level right
+  before the real response goes out — nothing else on the site (e.g. a compression buffer opened by
+  the server) is touched — leaving clean JSON regardless of what any other active plugin printed in
+  between.
+- Wired at the two places every JSON response from this plugin passes through: `WSP_MCP_Server`'s new
+  `rest_pre_echo_response` filter (covers every JSON-RPC response and the 401 challenge, since all of
+  them are `WP_REST_Response` objects — a no-op on every REST response that isn't this plugin's own,
+  so it's safe to leave unconditional site-wide) and `WSP_MCP_OAuth_Server::send_json()` (the single
+  choke point every OAuth JSON response — discovery documents, dynamic client registration, the token
+  endpoint — already goes through).
+- **Known residual gap:** this cannot catch output printed before this plugin's own file is
+  `include`d by WordPress's plugin loader (e.g. a stray `echo` at the top level of some other
+  plugin's main file that happens to load first, alphabetically or otherwise) — there is no earlier
+  hook a regular, non-mu plugin has access to. Everything from `plugins_loaded` onward, which is
+  where real-world stray output actually happens, is covered.
+
+---
+
 ## [2.7.2] — 2026-09-09
 
 ### Fixed — OAuth discovery on subdirectory installs ("connector has no tools available")
