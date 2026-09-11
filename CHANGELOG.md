@@ -8,6 +8,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.7.4] — 2026-09-11
+
+### Security — Hardening of the native OAuth authorization server before first release
+
+Pre-release review of the OAuth/Connectors work in this same branch. None of these shipped to users
+(the OAuth server has never been in a released build), but each was exploitable as written.
+
+- **The OAuth server is now off until an administrator turns it on** (`includes/server/class-oauth-server.php`, `includes/admin/connection-page.php`). `WSP_MCP_OAuth_Server::init()` was hooked unconditionally on `plugins_loaded` with no setting to disable it, so simply taking the update would have published two discovery documents plus unauthenticated registration, authorize and token endpoints on every site. New option `wsp_mcp_oauth_enabled` (default `false`, constant `WSP_MCP_OAUTH_OPTION`, helper `wsp_mcp_oauth_is_enabled()`) gates routing, discovery, the `resource_metadata` pointer in the 401 challenge, **and** acceptance of already-issued OAuth tokens — so the off switch actually disconnects, rather than just refusing new grants. Toggled from MCP > Connection via nonce-protected `admin_post_wsp_mcp_toggle_oauth` (`manage_options`); switching off calls the new `WSP_MCP_OAuth_Store::revoke_everything()`.
+- **The consent screen now shows where the authorization is going** (`render_consent_page()`). It previously displayed only `client_name` — a value the client supplies to the *unauthenticated* registration endpoint, i.e. a self-assigned label with no verification behind it — and never showed the redirect target at all. An attacker could register a client named e.g. "WordPress Core Security Update" pointing at their own callback, send a logged-in editor or administrator the `/authorize` link, and a single "Allow" click would mint an access token bound to that user's account (1h access + 30-day rotating refresh, with every enabled write tool). The redirect **host** and full URI are now shown prominently, with an explicit note that the application's name is unverified.
+- **Approving a connector now requires a real capability, not just a login** (`handle_authorize()`). The only check was `is_user_logged_in()`. Six tools register with an empty capability — `require_cap()` treats that as "any authenticated user" — and `wsp_execute_get_posts()` accepts `status=all`, returning every draft, pending and scheduled post with no author filter. On any site with open registration (WooCommerce, membership, LMS), anyone who could sign up could connect Claude and read unpublished content. New `wsp_mcp_oauth_min_capability()` (default `edit_posts`, filterable via `wsp_mcp_oauth_min_capability`) is enforced before the consent screen renders and again on the consent POST.
+- **The consent and error pages can no longer be framed** (`send_frame_protection_headers()`). Both render on `init`, outside wp-admin, so WordPress's own admin framing protection never applied to them and the "Allow" button was clickjackable. Both now send `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+- **Dynamic Client Registration is throttled and bounded** (`handle_register()`, `includes/server/class-oauth-store.php`). The per-IP rate limiter existed but was called only from the token endpoint, leaving `/wsp-mcp-oauth/register` — necessarily unauthenticated under RFC 7591 — as an open, unlimited row-insert for anyone on the internet, with no cleanup path (`cleanup_expired()` never touched the clients table). `enforce_rate_limit()` now takes a bucket, max and window, and registration gets its own tight budget (5 per 10 minutes per IP) separate from the token endpoint's deliberately generous 60/60s. Added `MAX_CLIENTS` (250) as an absolute ceiling, plus `count_clients()` and `prune_unused_clients()`, which deletes registrations older than `UNUSED_CLIENT_TTL` (24h) that never produced a token — run both opportunistically at registration and on the daily `wsp_mcp_oauth_cleanup` cron, so a burst of junk cannot hold the ceiling against legitimate clients.
+- **Refresh-token replay now revokes the whole token family** (`rotate_refresh_token()`). Rotation revoked only the single presented row, so replaying a stolen-but-already-spent refresh token just returned `invalid_grant` while the successor token stayed live for whoever held it. A replay is now detected via the new `find_rotated_token()` and triggers `revoke_all_for( client_id, user_id )`, per RFC 9700 §4.14.2.
+- `uninstall.php` also removes the new `wsp_mcp_oauth_enabled` option.
+
+### Known gap
+- There is still **no admin screen listing registered OAuth clients or live tokens, and no per-connector revoke button** — the only controls are the global off switch and `revoke_everything()`. Tracked in `AGENTS.md` ("OAuth authorization server — security invariants"); should land before OAuth is promoted as the primary connection path.
+
+---
+
 ## [2.7.3] — 2026-09-10
 
 ### Fixed — stray output from other plugins/themes could corrupt the JSON response ("no tools available")

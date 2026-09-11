@@ -35,6 +35,52 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+/** Option holding the admin's explicit opt-in to the OAuth authorization server. */
+define( 'WSP_MCP_OAUTH_OPTION', 'wsp_mcp_oauth_enabled' );
+
+/**
+ * Whether the site owner has switched the OAuth authorization server on.
+ *
+ * **Off unless an administrator explicitly enables it** (MCP > Connection).
+ * This is a public, unauthenticated surface — Dynamic Client Registration, an
+ * authorize endpoint that mints credentials for whoever clicks Allow, and two
+ * discovery documents served at the site root — so it must never appear on a
+ * site simply because the plugin was updated. An admin who wants the one-click
+ * Claude Connector flow turns it on; everyone else keeps the API-key and
+ * Application Password transports they already had, and the OAuth endpoints
+ * 404 exactly as if this code were not present.
+ *
+ * @return bool
+ */
+function wsp_mcp_oauth_is_enabled() {
+	return (bool) get_option( WSP_MCP_OAUTH_OPTION, false );
+}
+
+/**
+ * The minimum capability a WordPress user must hold to authorize a connector
+ * for their own account.
+ *
+ * Login alone is deliberately not enough. Six tools register with an empty
+ * capability (`require_cap()` treats that as "any authenticated user"), and
+ * `wsp_get_posts` accepts `status=all` — which returns every draft, pending
+ * and scheduled post on the site with no author filter. On a site with open
+ * registration (WooCommerce, membership, LMS) that would let anyone who can
+ * sign up mint a token from claude.ai and read unpublished content.
+ *
+ * `edit_posts` is the floor: it is what "this person is site staff" means in
+ * WordPress, and it is already the capability most tools here require.
+ *
+ * @return string A capability name; filterable for sites with custom roles.
+ */
+function wsp_mcp_oauth_min_capability() {
+	/**
+	 * Filters the capability required to approve an OAuth connector.
+	 *
+	 * @param string $capability Default 'edit_posts'.
+	 */
+	return (string) apply_filters( 'wsp_mcp_oauth_min_capability', 'edit_posts' );
+}
+
 class WSP_MCP_OAuth_Server {
 
 	/**
@@ -49,8 +95,24 @@ class WSP_MCP_OAuth_Server {
 	const RATE_LIMIT_MAX    = 60;
 	const RATE_LIMIT_WINDOW = 60;
 
+	/**
+	 * Dynamic Client Registration is unauthenticated by design (RFC 7591 —
+	 * Claude has no credential to present before it has registered), so it is
+	 * the one endpoint here a stranger can write rows with. It gets its own,
+	 * much tighter per-IP budget than the token endpoint: a real client
+	 * registers once per connector, never in a loop. See also
+	 * WSP_MCP_OAuth_Store::MAX_CLIENTS for the absolute ceiling.
+	 */
+	const REGISTER_RATE_LIMIT_MAX    = 5;
+	const REGISTER_RATE_LIMIT_WINDOW = 600;
+
 	/** Register the early request-path dispatcher. */
 	public static function init() {
+		// Nothing is routed, and no discovery document is served, until an
+		// administrator opts in — see wsp_mcp_oauth_is_enabled().
+		if ( ! wsp_mcp_oauth_is_enabled() ) {
+			return;
+		}
 		add_action( 'init', array( __CLASS__, 'maybe_dispatch' ), 0 );
 	}
 
@@ -237,6 +299,25 @@ class WSP_MCP_OAuth_Server {
 	/* ---------- Dynamic Client Registration (RFC 7591) ---------- */
 
 	private static function handle_register() {
+		// This endpoint cannot require a credential (the caller has none yet),
+		// so it is throttled per source IP and backed by an absolute row
+		// ceiling. Without both, anyone on the internet can insert unbounded
+		// rows into the clients table, and every registered client is a
+		// potential consent-phishing identity (see render_consent_page()).
+		self::enforce_rate_limit( 'register', self::REGISTER_RATE_LIMIT_MAX, self::REGISTER_RATE_LIMIT_WINDOW );
+
+		// Opportunistically drop abandoned registrations before testing the
+		// ceiling, so a burst of junk can't permanently lock out real clients.
+		if ( WSP_MCP_OAuth_Store::count_clients() >= WSP_MCP_OAuth_Store::MAX_CLIENTS ) {
+			WSP_MCP_OAuth_Store::prune_unused_clients();
+		}
+		if ( WSP_MCP_OAuth_Store::count_clients() >= WSP_MCP_OAuth_Store::MAX_CLIENTS ) {
+			self::send_json( array(
+				'error'             => 'invalid_client_metadata',
+				'error_description' => 'This server is not accepting new client registrations right now.',
+			), 429 );
+		}
+
 		$raw  = file_get_contents( 'php://input' );
 		$body = json_decode( (string) $raw, true );
 		if ( ! is_array( $body ) ) {
@@ -361,6 +442,19 @@ class WSP_MCP_OAuth_Server {
 			exit;
 		}
 
+		// Logged in, but is this account allowed to hand an AI client a
+		// credential at all? Six tools register with an empty capability, and
+		// `wsp_get_posts` with status=all returns every draft on the site, so
+		// "any subscriber who can register" is too low a bar to mint a token.
+		// Checked before the consent screen renders *and* again on the POST,
+		// since both paths pass through here.
+		$min_cap = wsp_mcp_oauth_min_capability();
+		if ( '' !== $min_cap && ! current_user_can( $min_cap ) ) {
+			self::render_error_page(
+				__( 'Your WordPress account is not permitted to connect an AI client to this site. Ask an administrator to grant your account the required permission, or to connect using their own account.', 'wsp-mcp-ai-agents-connector' )
+			);
+		}
+
 		$action = isset( $params['wsp_mcp_oauth_action'] ) ? sanitize_text_field( $params['wsp_mcp_oauth_action'] ) : '';
 
 		if ( 'POST' === $method && '' !== $action ) {
@@ -398,14 +492,38 @@ class WSP_MCP_OAuth_Server {
 		self::render_consent_page( $client, $client_id, $redirect_uri, $state, $challenge, $challenge_m, $scope );
 	}
 
-	/** Minimal, escaped consent screen. No theme dependency — this runs before template_redirect. */
+	/**
+	 * Minimal, escaped consent screen. No theme dependency — this runs before
+	 * template_redirect.
+	 *
+	 * What the person approving this needs to see, and why:
+	 *
+	 * - **The destination host, not just a name.** `client_name` is whatever
+	 *   the client sent to the (unauthenticated) registration endpoint — it is
+	 *   a self-assigned label, not an identity, and anyone can register a
+	 *   client calling itself "WordPress Security Update". Showing only that
+	 *   name turns this page into a one-click account-handover: register a
+	 *   client pointing at your own callback, send a logged-in editor the
+	 *   /authorize link, and their "Allow" mints a token bound to their user.
+	 *   Naming the host the code will actually be sent to is what lets a human
+	 *   catch that, so the host is displayed prominently and the name is
+	 *   explicitly flagged as unverified.
+	 * - **It must not be frameable.** This page renders on `init`, outside
+	 *   wp-admin, so WordPress's own admin framing protection never applies to
+	 *   it. Without the headers below, the Allow button can be overlaid in an
+	 *   invisible iframe and clickjacked, which skips the phishing step
+	 *   entirely.
+	 */
 	private static function render_consent_page( $client, $client_id, $redirect_uri, $state, $challenge, $challenge_m, $scope ) {
 		nocache_headers();
+		self::send_frame_protection_headers();
 		header( 'Content-Type: text/html; charset=utf-8' );
 		$site_name   = esc_html( get_bloginfo( 'name' ) );
 		$client_name = esc_html( $client['client_name'] );
 		$user        = wp_get_current_user();
 		$user_label  = esc_html( $user->user_login );
+		$redirect_host = wp_parse_url( $redirect_uri, PHP_URL_HOST );
+		$redirect_host = is_string( $redirect_host ) ? $redirect_host : $redirect_uri;
 		?>
 		<!doctype html>
 		<html <?php language_attributes(); ?>>
@@ -419,6 +537,11 @@ class WSP_MCP_OAuth_Server {
 				h1{font-size:18px;margin:0 0 6px}
 				p{font-size:13.5px;line-height:1.6;color:#3c434a}
 				.who{font-size:12.5px;color:#646970;margin-bottom:20px}
+				.dest{margin:18px 0 0;padding:12px 14px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:6px}
+				.dest-l{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#646970;margin-bottom:4px}
+				.dest-h{font-size:14px;font-weight:700;word-break:break-all;color:#1d2327}
+				.dest-u{display:block;font-size:11.5px;color:#646970;word-break:break-all;margin-top:4px}
+				.warn{margin:14px 0 0;padding:11px 14px;background:#fcf9e8;border:1px solid #f0e6b2;border-radius:6px;font-size:12.5px;line-height:1.55;color:#674f00}
 				.actions{display:flex;gap:10px;margin-top:24px}
 				button{flex:1;padding:10px 16px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;border:1px solid #dcdcde}
 				.allow{background:#0073aa;color:#fff;border-color:#0073aa}
@@ -430,6 +553,17 @@ class WSP_MCP_OAuth_Server {
 				<h1><?php echo esc_html( sprintf( /* translators: %s: connecting client name */ __( '%s wants to connect', 'wsp-mcp-ai-agents-connector' ), $client_name ) ); ?></h1>
 				<p class="who"><?php echo esc_html( sprintf( /* translators: %s: WordPress username */ __( 'Signed in as %s', 'wsp-mcp-ai-agents-connector' ), $user_label ) ); ?></p>
 				<p><?php echo esc_html( sprintf( /* translators: %s: site name */ __( 'This will let it read and act on %s through the MCP tools your account is allowed to use.', 'wsp-mcp-ai-agents-connector' ), $site_name ) ); ?></p>
+
+				<div class="dest">
+					<span class="dest-l"><?php esc_html_e( 'Access will be sent to', 'wsp-mcp-ai-agents-connector' ); ?></span>
+					<span class="dest-h"><?php echo esc_html( $redirect_host ); ?></span>
+					<span class="dest-u"><?php echo esc_html( $redirect_uri ); ?></span>
+				</div>
+
+				<p class="warn">
+					<?php esc_html_e( 'Only click Allow if you started this yourself and you recognize the address above. The application\'s name is supplied by the application itself and is not verified by this site — anyone can choose one.', 'wsp-mcp-ai-agents-connector' ); ?>
+				</p>
+
 				<form method="post" action="<?php echo esc_url( home_url( '/wsp-mcp-oauth/authorize' ) ); ?>">
 					<?php wp_nonce_field( 'wsp_mcp_oauth_consent_' . $client_id ); ?>
 					<input type="hidden" name="client_id" value="<?php echo esc_attr( $client_id ); ?>">
@@ -499,8 +633,24 @@ class WSP_MCP_OAuth_Server {
 		return empty( $granted ) ? 'mcp' : implode( ' ', $granted );
 	}
 
+	/**
+	 * Refuse to be rendered inside a frame. Both headers are sent: CSP
+	 * `frame-ancestors` is the modern control and is what browsers actually
+	 * honour, X-Frame-Options is kept for older clients and because security
+	 * scanners and the WordPress.org review look for it. Applied to every HTML
+	 * page this server emits — the consent screen because its Allow button is
+	 * the clickjacking target, the error page because it is reachable with
+	 * attacker-chosen text.
+	 */
+	private static function send_frame_protection_headers() {
+		header( 'X-Frame-Options: DENY' );
+		header( "Content-Security-Policy: frame-ancestors 'none'" );
+		header( 'Referrer-Policy: strict-origin-when-cross-origin' );
+	}
+
 	private static function render_error_page( $message ) {
 		nocache_headers();
+		self::send_frame_protection_headers();
 		status_header( 400 );
 		header( 'Content-Type: text/html; charset=utf-8' );
 		echo '<!doctype html><html><head><meta charset="utf-8"><title>' . esc_html__( 'Authorization error', 'wsp-mcp-ai-agents-connector' ) . '</title></head><body style="font-family:sans-serif;padding:40px;"><h1>' . esc_html__( 'Authorization error', 'wsp-mcp-ai-agents-connector' ) . '</h1><p>' . esc_html( $message ) . '</p></body></html>';
@@ -615,32 +765,40 @@ class WSP_MCP_OAuth_Server {
 	}
 
 	/**
-	 * Throttle the token endpoint per source IP using a transient counter.
-	 * Sends a 429 (with Retry-After) and exits once the caller has made more
-	 * than RATE_LIMIT_MAX requests within the RATE_LIMIT_WINDOW.
+	 * Throttle one endpoint per source IP using a transient counter. Sends a
+	 * 429 (with Retry-After) and exits once the caller has made more than $max
+	 * requests to that endpoint within $window seconds.
+	 *
+	 * Each $bucket keeps its own counter, so the generous token-endpoint
+	 * budget (Anthropic's whole OAuth fleet shares one egress range) cannot be
+	 * spent by, or spend, the deliberately tight registration budget.
 	 *
 	 * Fails open (no throttling) only when the IP genuinely cannot be
 	 * determined, so this can never wedge every client behind one shared
 	 * proxy IP into indefinitely rejecting everyone else — see client_ip().
+	 *
+	 * @param string $bucket Endpoint identifier, e.g. 'token' or 'register'.
+	 * @param int    $max    Max requests permitted in the window.
+	 * @param int    $window Window length in seconds.
 	 */
-	private static function enforce_rate_limit() {
+	private static function enforce_rate_limit( $bucket = 'token', $max = self::RATE_LIMIT_MAX, $window = self::RATE_LIMIT_WINDOW ) {
 		$ip = self::client_ip();
 		if ( '' === $ip ) {
 			return;
 		}
-		$key   = 'wsp_mcp_oauth_rl_' . md5( $ip );
+		$key   = 'wsp_mcp_oauth_rl_' . md5( $bucket . '|' . $ip );
 		$count = (int) get_transient( $key );
-		if ( $count >= self::RATE_LIMIT_MAX ) {
+		if ( $count >= $max ) {
 			nocache_headers();
-			header( 'Retry-After: ' . self::RATE_LIMIT_WINDOW );
+			header( 'Retry-After: ' . (int) $window );
 			self::send_json( array( 'error' => 'slow_down', 'error_description' => 'Too many requests. Please retry later.' ), 429 );
 		}
 		// First hit in the window sets the TTL; later hits just increment,
 		// so the window doesn't keep sliding forward on every request.
 		if ( 0 === $count ) {
-			set_transient( $key, 1, self::RATE_LIMIT_WINDOW );
+			set_transient( $key, 1, $window );
 		} else {
-			set_transient( $key, $count + 1, self::RATE_LIMIT_WINDOW );
+			set_transient( $key, $count + 1, $window );
 		}
 	}
 

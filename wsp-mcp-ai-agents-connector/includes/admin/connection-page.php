@@ -181,6 +181,40 @@ function wsp_mcp_handle_regenerate_key() {
 }
 add_action( 'admin_post_wsp_mcp_regenerate_key', 'wsp_mcp_handle_regenerate_key' );
 
+/**
+ * Turn the native OAuth authorization server on or off.
+ *
+ * Off by default (see wsp_mcp_oauth_is_enabled()): enabling it publishes two
+ * discovery documents plus unauthenticated registration, authorize and token
+ * endpoints, so it takes a deliberate administrator action rather than
+ * arriving with a plugin update. Turning it back off unroutes all of them and
+ * immediately stops honouring every token already issued.
+ */
+function wsp_mcp_handle_toggle_oauth() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( 'Insufficient permissions.', 'wsp-mcp-ai-agents-connector' ) );
+	}
+	check_admin_referer( 'wsp_mcp_toggle_oauth' );
+
+	$enable = isset( $_POST['wsp_mcp_oauth_enable'] )
+		&& '1' === sanitize_key( wp_unslash( $_POST['wsp_mcp_oauth_enable'] ) );
+	update_option( WSP_MCP_OAUTH_OPTION, $enable ? 1 : 0, false );
+
+	// Revoking access is the whole point of the off switch, so drop every
+	// issued credential rather than leaving rows that would come back to life
+	// if the feature were re-enabled later.
+	if ( ! $enable && class_exists( 'WSP_MCP_OAuth_Store' ) ) {
+		WSP_MCP_OAuth_Store::revoke_everything();
+	}
+
+	wp_safe_redirect( add_query_arg(
+		array( 'page' => 'wsp-mcp-connection', 'wsp_oauth_toggled' => $enable ? '1' : '0' ),
+		admin_url( 'admin.php' )
+	) );
+	exit;
+}
+add_action( 'admin_post_wsp_mcp_toggle_oauth', 'wsp_mcp_handle_toggle_oauth' );
+
 /** Render the Connection page. */
 function wsp_mcp_connection_page() {
 	if ( ! current_user_can( 'manage_options' ) ) {
@@ -302,6 +336,19 @@ function wsp_mcp_connection_page() {
 			</p></div>
 		<?php endif; ?>
 
+		<?php if ( isset( $_GET['wsp_oauth_toggled'] ) ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+			<div class="notice notice-success is-dismissible"><p>
+				<?php
+				// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only admin notice routing, no state change.
+				if ( '1' === sanitize_key( wp_unslash( $_GET['wsp_oauth_toggled'] ) ) ) {
+					esc_html_e( 'One-click Claude Connector sign-in is now enabled. Anyone with an account on this site that can edit posts may connect their own AI client.', 'wsp-mcp-ai-agents-connector' );
+				} else {
+					esc_html_e( 'One-click Claude Connector sign-in is now disabled, and every connector that used it has been disconnected.', 'wsp-mcp-ai-agents-connector' );
+				}
+				?>
+			</p></div>
+		<?php endif; ?>
+
 		<div class="wsp-facts">
 			<table role="presentation">
 				<tr>
@@ -337,13 +384,38 @@ function wsp_mcp_connection_page() {
 
 		<!-- Claude Connectors (claude.ai / Claude Desktop / mobile — no config file, no header, real login) -->
 		<div class="wsp-tab-panel wsp-tab-panel-active" id="wsp-tab-claudeweb">
+			<?php $oauth_on = wsp_mcp_oauth_is_enabled(); ?>
+
 			<div class="wsp-connect-callout">
 				<div>
 					<strong><?php esc_html_e( '⚡ Paste a URL — nothing else to copy', 'wsp-mcp-ai-agents-connector' ); ?></strong>
-					<p><?php esc_html_e( 'This site runs its own OAuth login. Paste the URL below into Claude\'s Connectors screen, click Connect, and log in when Claude asks — no header, no API key, nothing to copy but the URL.', 'wsp-mcp-ai-agents-connector' ); ?></p>
+					<p><?php esc_html_e( 'This site can run its own OAuth login. Paste the URL below into Claude\'s Connectors screen, click Connect, and log in when Claude asks — no header, no API key, nothing to copy but the URL.', 'wsp-mcp-ai-agents-connector' ); ?></p>
 				</div>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+					<input type="hidden" name="action" value="wsp_mcp_toggle_oauth" />
+					<input type="hidden" name="wsp_mcp_oauth_enable" value="<?php echo $oauth_on ? '0' : '1'; ?>" />
+					<?php wp_nonce_field( 'wsp_mcp_toggle_oauth' ); ?>
+					<button type="submit" class="wsp-connect-btn"
+						<?php if ( $oauth_on ) : ?>
+							style="background:#8c8f94"
+							onclick="return confirm('<?php echo esc_js( __( 'Disable OAuth sign-in? Every connector that logged in this way will be disconnected immediately and will have to reconnect.', 'wsp-mcp-ai-agents-connector' ) ); ?>');"
+						<?php endif; ?>>
+						<?php
+						echo $oauth_on
+							? esc_html__( 'Disable OAuth sign-in', 'wsp-mcp-ai-agents-connector' )
+							: esc_html__( 'Enable OAuth sign-in', 'wsp-mcp-ai-agents-connector' );
+						?>
+					</button>
+				</form>
 			</div>
-			<div class="wsp-config-box">
+
+			<?php if ( ! $oauth_on ) : ?>
+				<p class="wsp-gen-notice">
+					<?php esc_html_e( '⚠ OAuth sign-in is currently off, and the steps below will not work until you enable it. It is off by default because it publishes public login endpoints on this site: once enabled, any AI client can ask this site for access, and anyone holding a WordPress account here that can edit posts may approve it for their own account. The other tabs (API key / Application Password) do not require it.', 'wsp-mcp-ai-agents-connector' ); ?>
+				</p>
+			<?php endif; ?>
+
+			<div class="wsp-config-box"<?php echo $oauth_on ? '' : ' style="opacity:.55"'; ?>>
 				<div class="wsp-instructions">
 					<p><span class="wsp-badge"><?php esc_html_e( 'OAuth login', 'wsp-mcp-ai-agents-connector' ); ?></span> <?php esc_html_e( 'Works in Claude.ai, Claude Desktop, and Claude mobile — they all share the same Connectors settings.', 'wsp-mcp-ai-agents-connector' ); ?></p>
 					<p>1. <?php esc_html_e( 'In Claude, open', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Customize', 'wsp-mcp-ai-agents-connector' ); ?> &gt; <?php esc_html_e( 'Connectors', 'wsp-mcp-ai-agents-connector' ); ?></strong> <?php esc_html_e( '(Team/Enterprise: Organization settings > Connectors) and click', 'wsp-mcp-ai-agents-connector' ); ?> <strong><?php esc_html_e( 'Add custom connector', 'wsp-mcp-ai-agents-connector' ); ?></strong>.</p>
@@ -365,7 +437,7 @@ function wsp_mcp_connection_page() {
 				<?php esc_html_e( '⚠ This site must be reachable on the public internet with a real domain and HTTPS — Claude\'s servers connect from their own cloud, not your computer, so they cannot reach localhost or a private network.', 'wsp-mcp-ai-agents-connector' ); ?>
 			</p>
 			<p class="wsp-desc" style="margin-top:10px;">
-				<?php esc_html_e( 'Whoever clicks Allow connects as themselves — Claude can then only do what that WordPress account is permitted to do, same as anywhere else on this site.', 'wsp-mcp-ai-agents-connector' ); ?>
+				<?php esc_html_e( 'Whoever clicks Allow connects as themselves — Claude can then only do what that WordPress account is permitted to do, same as anywhere else on this site. Accounts that cannot edit posts (subscribers, customers) are refused at the consent screen, so opening registration on this site does not open MCP access with it.', 'wsp-mcp-ai-agents-connector' ); ?>
 				<?php esc_html_e( 'Prefer the API key or Application Password instead? Use the Claude Desktop (config file) tab or the Configuration Generator above.', 'wsp-mcp-ai-agents-connector' ); ?>
 			</p>
 		</div>

@@ -71,8 +71,11 @@ class WSP_MCP_Auth {
 				return true;
 			}
 			// Not the static key — try it as a token from this plugin's own
-			// OAuth authorization server (class-oauth-server.php).
-			if ( class_exists( 'WSP_MCP_OAuth_Store' ) ) {
+			// OAuth authorization server (class-oauth-server.php). Gated on
+			// the same admin opt-in that serves the OAuth endpoints, so
+			// switching the feature off also stops honouring any token it
+			// previously issued rather than leaving live credentials behind.
+			if ( class_exists( 'WSP_MCP_OAuth_Store' ) && function_exists( 'wsp_mcp_oauth_is_enabled' ) && wsp_mcp_oauth_is_enabled() ) {
 				$oauth = WSP_MCP_OAuth_Store::validate_access_token( $token );
 				if ( is_array( $oauth ) && $oauth['user_id'] > 0 ) {
 					wp_set_current_user( $oauth['user_id'] );
@@ -161,7 +164,11 @@ class WSP_MCP_Auth {
 				'message' => 'Authentication required. Use an Application Password (Basic), Authorization: Bearer <api-key-or-oauth-token>, or the X-WSP-MCP-API-Key header.',
 			),
 		), 401 );
-		$resource_metadata = class_exists( 'WSP_MCP_OAuth_Server' )
+		// Only advertise OAuth discovery when the authorization server is
+		// actually switched on — pointing a client at metadata this install
+		// will not serve produces a connector that authenticates against
+		// nothing and then fails every call.
+		$resource_metadata = ( class_exists( 'WSP_MCP_OAuth_Server' ) && function_exists( 'wsp_mcp_oauth_is_enabled' ) && wsp_mcp_oauth_is_enabled() )
 			? WSP_MCP_OAuth_Server::protected_resource_metadata_url()
 			: '';
 		$www_authenticate = $resource_metadata

@@ -32,6 +32,23 @@ class WSP_MCP_OAuth_Store {
 	/** Refresh token lifetime in seconds (30 days), rotated on every use. */
 	const REFRESH_TTL = 2592000;
 
+	/**
+	 * Absolute ceiling on registered clients. Dynamic Client Registration is
+	 * necessarily unauthenticated, so without a ceiling the clients table is an
+	 * open write surface for anyone on the internet. A real site accumulates a
+	 * handful of rows (one per connector per reconnect); this is far above any
+	 * legitimate use and exists only to bound the damage.
+	 */
+	const MAX_CLIENTS = 250;
+
+	/**
+	 * How long a client that never completed a grant is kept before it is
+	 * eligible for pruning. Long enough that a human can take their time on the
+	 * login + consent screens, short enough that drive-by registrations do not
+	 * accumulate.
+	 */
+	const UNUSED_CLIENT_TTL = 86400;
+
 	/** @return string Clients table name. */
 	private static function clients_table() {
 		global $wpdb;
@@ -121,6 +138,66 @@ class WSP_MCP_OAuth_Store {
 			array( '%s', '%s', '%s', '%s' )
 		);
 		return $client_id;
+	}
+
+	/**
+	 * How many clients are currently registered.
+	 *
+	 * @return int
+	 */
+	public static function count_clients() {
+		global $wpdb;
+		$table = self::clients_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Table name from $wpdb->prefix; no user input in this query.
+		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+	}
+
+	/**
+	 * Delete registrations older than UNUSED_CLIENT_TTL that never produced a
+	 * token — i.e. someone hit the registration endpoint and then never
+	 * completed (or never attempted) a grant.
+	 *
+	 * This is what keeps the unauthenticated registration endpoint from being
+	 * a permanent write: junk rows expire on their own, so a burst of them
+	 * cannot hold the MAX_CLIENTS ceiling against legitimate clients. A client
+	 * that has ever been used has a row in the tokens table and is never
+	 * pruned here, even if its tokens have since been revoked or expired.
+	 *
+	 * @return int Rows deleted.
+	 */
+	public static function prune_unused_clients() {
+		global $wpdb;
+		$clients = self::clients_table();
+		$tokens  = self::tokens_table();
+		$cutoff  = gmdate( 'Y-m-d H:i:s', time() - self::UNUSED_CLIENT_TTL );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		return (int) $wpdb->query( $wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table names from $wpdb->prefix (no user input); value bound via prepare().
+			"DELETE c FROM {$clients} c
+			 LEFT JOIN {$tokens} t ON t.client_id = c.client_id
+			 WHERE c.created_at <= %s AND t.id IS NULL",
+			$cutoff
+		) );
+	}
+
+	/**
+	 * Revoke every live token issued to one client for one user. Used when a
+	 * refresh token is replayed after rotation — see rotate_refresh_token().
+	 *
+	 * @param string $client_id Client identifier.
+	 * @param int    $user_id   WordPress user.
+	 * @return int Rows revoked.
+	 */
+	public static function revoke_all_for( $client_id, $user_id ) {
+		global $wpdb;
+		$table = self::tokens_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		return (int) $wpdb->query( $wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from $wpdb->prefix (no user input); values bound via prepare().
+			"UPDATE {$table} SET revoked = 1 WHERE client_id = %s AND user_id = %d AND revoked = 0",
+			$client_id,
+			(int) $user_id
+		) );
 	}
 
 	/**
@@ -283,6 +360,17 @@ class WSP_MCP_OAuth_Store {
 			current_time( 'mysql', true )
 		), ARRAY_A );
 		if ( ! $row ) {
+			// Miss. Before giving up, check whether this token matches a pair
+			// we already rotated: a *replay* of a spent refresh token means
+			// either the client mishandled rotation or the token leaked and
+			// two parties now hold it. Neither is recoverable by guessing, so
+			// per RFC 9700 §4.14.2 revoke the whole family for that
+			// client+user rather than leaving the still-live successor token
+			// usable by whoever stole it.
+			$spent = self::find_rotated_token( $hash, $client_id );
+			if ( $spent ) {
+				self::revoke_all_for( $client_id, (int) $spent['user_id'] );
+			}
 			return null;
 		}
 		// Revoke the old pair (rotation — refresh tokens are single-use).
@@ -295,7 +383,50 @@ class WSP_MCP_OAuth_Store {
 		return $fresh;
 	}
 
-	/** Remove expired codes and long-expired revoked/refresh-expired tokens (daily cron). */
+	/**
+	 * Revoke every issued token and drop every pending authorization code.
+	 * Used when an administrator switches the OAuth server off — the off
+	 * switch has to actually cut existing connectors, not just stop new ones.
+	 * Client registrations are left in place so a re-enable does not force
+	 * every connector to re-register.
+	 *
+	 * @return int Tokens revoked.
+	 */
+	public static function revoke_everything() {
+		global $wpdb;
+		$tokens = self::tokens_table();
+		$codes  = self::codes_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Table names from $wpdb->prefix; no user input in these queries.
+		$revoked = (int) $wpdb->query( "UPDATE {$tokens} SET revoked = 1 WHERE revoked = 0" );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$wpdb->query( "DELETE FROM {$codes}" );
+		return $revoked;
+	}
+
+	/**
+	 * Look up a refresh-token hash that has already been rotated away (revoked
+	 * but not yet pruned), so a replay can be distinguished from a plain
+	 * garbage token. Deliberately ignores expiry — a spent token replayed after
+	 * its window closed is the same signal.
+	 *
+	 * @param string $hash      SHA-256 of the presented refresh token.
+	 * @param string $client_id Client identifier presented alongside it.
+	 * @return array|null
+	 */
+	private static function find_rotated_token( $hash, $client_id ) {
+		global $wpdb;
+		$table = self::tokens_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$row = $wpdb->get_row( $wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from $wpdb->prefix (no user input); values bound via prepare().
+			"SELECT user_id FROM {$table} WHERE refresh_token_hash = %s AND client_id = %s AND revoked = 1",
+			$hash,
+			$client_id
+		), ARRAY_A );
+		return $row ?: null;
+	}
+
+	/** Remove expired codes, long-expired tokens, and abandoned clients (daily cron). */
 	public static function cleanup_expired() {
 		global $wpdb;
 		$now = current_time( 'mysql', true );
@@ -314,5 +445,10 @@ class WSP_MCP_OAuth_Store {
 			$now,
 			$now
 		) );
+		// Drop registrations that never led to a token — see
+		// prune_unused_clients(). Doing this on the daily cron as well as
+		// opportunistically at registration time means a site that is being
+		// probed self-heals without waiting for the next registration attempt.
+		self::prune_unused_clients();
 	}
 }

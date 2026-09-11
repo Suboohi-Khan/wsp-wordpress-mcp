@@ -83,8 +83,18 @@ where real-world stray output actually happens, is covered.
   `> 0` → accept, `0` → ambiguous, resolved with a `SELECT 1 … expires_at > NOW` existence check.
 - `class-auth.php` — `WSP_MCP_Auth`: accepts **(1)** Application Password (HTTP Basic, validated
   by WP core), **(2)** plugin API key via `Authorization: Bearer <key>`, **(3)** same key via
-  `X-WSP-MCP-API-Key`. API key stored in option `wsp_mcp_api_key` (admin-only → mapped to lowest-ID
-  admin so capability checks resolve). `require_cap()` gates each tool.
+  `X-WSP-MCP-API-Key`, **(4)** an OAuth access token, also as `Authorization: Bearer <token>`, tried
+  whenever a bearer value isn't the static key. API key stored in option `wsp_mcp_api_key`
+  (admin-only → mapped to lowest-ID admin so capability checks resolve); an OAuth token instead
+  binds to the specific user who approved consent. `require_cap()` gates each tool. Both the OAuth
+  token path and the `resource_metadata` pointer in the 401 challenge are gated on
+  `wsp_mcp_oauth_is_enabled()` — see the OAuth section below.
+- `class-oauth-server.php` / `class-oauth-store.php` — `WSP_MCP_OAuth_Server` /
+  `WSP_MCP_OAuth_Store`: a native OAuth 2.1 authorization server (RFC 8414 + 9728 discovery, RFC
+  7591 DCR, RFC 6749 + PKCE S256) powering Claude's "paste a URL only" Connector flow. Endpoints are
+  matched against the raw request path on `init` priority 0, not through the REST API. Three tables
+  (`wsp_mcp_oauth_clients` / `_codes` / `_tokens`), daily cron `wsp_mcp_oauth_cleanup`. **Read the
+  invariants below before touching either file.**
 
 **Tools (`includes/tools/native-tools.php`):** `wsp_mcp_register_native_tools()` registers every
 tool with `WSP_MCP_Server::register_tool($name, $spec)`. It **reuses the existing
@@ -104,6 +114,55 @@ regenerate, and per-client tabbed config snippets for Claude Desktop / Cursor / 
 OpenClaw / OpenCode — all native, no MCP Adapter). `dependency.php` provides
 `wsp_mcp_abilities_api_available()` (gates dual-mode) and `wsp_mcp_transport_available()` (always
 true in v2.0).
+
+### OAuth authorization server — security invariants (do not regress these)
+
+The OAuth server is the plugin's only **unauthenticated, publicly-reachable** surface: it accepts
+client registrations from strangers and mints credentials for whoever clicks Allow. Each rule below
+exists because its absence is an exploitable bug, not a style preference.
+
+1. **Off unless an admin opted in.** Option `wsp_mcp_oauth_enabled` (constant
+   `WSP_MCP_OAUTH_OPTION`), default `false`, read via `wsp_mcp_oauth_is_enabled()`.
+   `WSP_MCP_OAuth_Server::init()` returns early when off, so nothing is routed and no discovery
+   document is served. `class-auth.php` gates the OAuth token path and the 401 `resource_metadata`
+   pointer on the same check, so switching it off also stops honouring already-issued tokens.
+   Toggled from MCP > Connection (`admin_post_wsp_mcp_toggle_oauth`, nonce + `manage_options`);
+   turning it off calls `WSP_MCP_OAuth_Store::revoke_everything()`. **Never make this default-on** —
+   a plugin update must not publish login endpoints on a site that didn't ask for them.
+2. **Consent requires a real capability, not just a login.** `handle_authorize()` checks
+   `wsp_mcp_oauth_min_capability()` (default `edit_posts`, filterable) before rendering *or*
+   accepting the consent form. Login alone is not enough: six tools register with
+   `'capability' => ''`, and `wsp_get_posts` with `status=all` returns every draft/pending/scheduled
+   post with no author filter — so on a site with open registration, "any logged-in user" would mean
+   any visitor who signs up can read unpublished content through Claude.
+3. **The consent screen must name the destination.** `client_name` comes from the unauthenticated
+   registration endpoint — it is a self-assigned label, not an identity. `render_consent_page()`
+   therefore shows the redirect **host** and full URI prominently and states in the page that the
+   name is unverified. Without that, registering a client called "WordPress Security Update" that
+   points at an attacker callback turns one Allow click by a logged-in editor into a token bound to
+   their account.
+4. **No OAuth HTML page may be frameable.** `render_consent_page()` and `render_error_page()` both
+   call `send_frame_protection_headers()` (`X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` +
+   `Referrer-Policy`). These render on `init`, outside wp-admin, so core's own framing protection
+   never applies — without the headers the Allow button is clickjackable.
+5. **Registration is throttled and bounded.** `handle_register()` calls
+   `enforce_rate_limit( 'register', … )` (5 per 10 min per IP — its own bucket, separate from the
+   token endpoint's deliberately generous 60/60s, which has to absorb Anthropic's shared egress
+   range) and refuses past `WSP_MCP_OAuth_Store::MAX_CLIENTS`, pruning abandoned rows first.
+   `prune_unused_clients()` (also on the daily cron) deletes clients older than `UNUSED_CLIENT_TTL`
+   that never produced a token, so junk registrations can't hold the ceiling against real clients.
+6. **Refresh-token replay revokes the family.** `rotate_refresh_token()` revokes the presented pair
+   on use; if a *spent* (already-rotated) token is presented again, `find_rotated_token()` detects it
+   and `revoke_all_for( client, user )` kills every live token for that pair (RFC 9700 §4.14.2).
+7. **Unchanged invariants from the original implementation:** redirect_uri is exact-matched against
+   the registered allowlist *before* any redirect happens (canonicalized on both sides;
+   userinfo/fragment rejected); `wp_redirect()` not `wp_safe_redirect()` is correct **only** because
+   of that match; PKCE S256 is mandatory and compared with `hash_equals()`; codes are single-use and
+   deleted on first sight; tokens are stored as SHA-256 hashes only.
+
+> **Still outstanding (not fixed here):** there is no admin screen listing registered clients or live
+> tokens and no per-connector revoke button — the only controls are the global off switch and
+> `revoke_everything()`. Add one before advertising OAuth as the primary connection path.
 
 ### How to add a NEW MCP tool (v2.0)
 
@@ -224,7 +283,11 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 
 **Other persistent state:** option `wsp_mcp_api_key` (native API key), option `wsp_mcp_db_version`
-(migration gate), DB table `{prefix}wsp_mcp_sessions`, cron event `wsp_mcp_session_cleanup`.
+(migration gate), option `wsp_mcp_oauth_enabled` (OAuth opt-in, **default off**), DB tables
+`{prefix}wsp_mcp_sessions`, `{prefix}wsp_mcp_audit_log`, `{prefix}wsp_mcp_oauth_clients`,
+`{prefix}wsp_mcp_oauth_codes`, `{prefix}wsp_mcp_oauth_tokens`, cron events
+`wsp_mcp_session_cleanup`, `wsp_mcp_audit_log_cleanup`, `wsp_mcp_oauth_cleanup`.
+All of the above are removed in `uninstall.php`.
 
 ---
 
