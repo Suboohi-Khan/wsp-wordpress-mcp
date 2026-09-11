@@ -8,7 +8,118 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.7.4] — 2026-09-11
+## [2.8.0] — 2026-09-11
+
+First release since 2.7.1. Consolidates every change made since then: the versions numbered
+2.7.2, 2.7.3, 2.7.4 and 2.9.0–2.11.0 in earlier drafts of this file were never tagged or shipped,
+and their contents are folded in below rather than presented as releases users could have had.
+
+### Added — Native OAuth 2.1 authorization server / one-click Claude Connector (`includes/server/class-oauth-server.php`, `includes/server/class-oauth-store.php` — new files)
+
+- **Connect Claude by pasting a URL and nothing else.** The plugin now runs its own OAuth 2.1
+  authorization server, so Claude's **Customize > Connectors > Add custom connector** screen can
+  discover it, register itself, and send the user through a real WordPress login — no config file,
+  no API key to copy, no `Authorization` header to paste. Implements enough of RFC 8414 (AS
+  metadata), RFC 9728 (protected-resource metadata), RFC 7591 (Dynamic Client Registration) and
+  RFC 6749 + PKCE S256 (RFC 7636) for Claude's documented `oauth_dcr` flow.
+- **Endpoints** are matched against the raw request path on `init` priority 0, not through the REST
+  API: the two `.well-known/*` discovery documents must sit outside any REST namespace, and the
+  token endpoint must accept `application/x-www-form-urlencoded` bodies. Discovery is served at
+  every path spelling a given install can actually reach, so subdirectory installs resolve to
+  themselves rather than to whatever owns the domain root.
+- **Tokens are bound to the user who clicked Allow**, so tool calls run through the same
+  `require_cap()` checks as any other logged-in user — a stricter model than the static API key,
+  which maps every request to the lowest-ID administrator. Public client only (no `client_secret`
+  is ever issued); authorization codes and refresh tokens are single-use and rotated; all tokens
+  are stored as SHA-256 hashes, so a database read alone is not a usable credential.
+- **Three new tables** (`{prefix}wsp_mcp_oauth_clients` / `_codes` / `_tokens`), created via
+  `dbDelta` alongside the existing sessions and audit-log tables, plus a daily cleanup cron
+  (`wsp_mcp_oauth_cleanup`). All are dropped in `uninstall.php`.
+- **Off by default** — see the Security section below for why, and for the hardening applied to
+  this feature before it shipped.
+
+### Added — Analytics & Performance dashboard (`includes/admin/analytics-page.php` — new file, `includes/audit/class-audit-log.php`)
+
+- **New `MCP > Analytics` screen** (`manage_options`): summary cards for total requests, most-used
+  tool, average response time and error rate; a per-category tool-usage breakdown rendered with
+  lightweight CSS progress bars; and a recent-requests performance log. A range selector covers the
+  last 7 / 30 / 90 days or all time.
+- **Computed entirely from the existing self-hosted audit log** (`{prefix}wsp_mcp_audit_log`) — no
+  external analytics service, no outbound request, no third-party script.
+- The audit-log table gained two columns to support it: `category` (the ability-registry group the
+  tool belongs to, e.g. "Elementor", "WooCommerce") and `duration_ms` (wall-clock execution time).
+  `WSP_MCP_Audit_Log::log()` takes both as new optional parameters, and `do_tools_call()` now times
+  every call and resolves its category via the registry.
+- `do_tools_call()` also now records an object-level permission failure (`WP_Error` code
+  `forbidden`, returned by the `guard.php` / ACF / Yoast / Rank Math guards) as an authorization
+  **denial** rather than a generic error, so those surface correctly when auditing.
+- New reporting helpers: `get_analytics_overview()`, `get_category_breakdown()`,
+  `get_recent_performance()`.
+
+### New — "Claude Connectors" tab on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **Zero-config-file connection path**, now the default first tab (`data-tab="claudeweb"`, replacing
+  the old default-active state on the classic Claude Desktop tab). Claude's own **Customize >
+  Connectors > Add custom connector** screen — a different product surface from the
+  `claude_desktop_config.json` file, shared across claude.ai, Claude Desktop, and Claude mobile —
+  accepts a bare **Remote MCP server URL** plus a **Request header** (`static_headers`, beta) instead
+  of an OAuth flow or a locally-edited JSON file. This tab surfaces exactly the two values that
+  screen needs: `#wsp-code-ccurl` (the endpoint, same `$endpoint` used everywhere else on this page)
+  and `#wsp-code-ccheader` (`Bearer <api_key>`, ready to paste as the `Authorization` header value),
+  each with its own `makeCopyBtn()`-wired Copy button. No PHP/JS logic changed elsewhere — this is
+  additive markup only, reusing existing helpers.
+- **Two hard constraints called out directly on the tab**, since neither is something this plugin
+  can fix: (1) Claude's servers connect from Anthropic's cloud infrastructure, not the user's
+  machine, so the site must be reachable on the public internet — `localhost` / private-network
+  installs cannot use this path and still need the config-file tab. (2) The Request-headers field is
+  a beta Anthropic is rolling out gradually per-organization; accounts that don't have it yet won't
+  see the field in their Add-custom-connector dialog and should use the (now second, no-longer-
+  default) **Claude Desktop (config file)** tab instead.
+- The old Claude Desktop tab is unchanged in content — only its `id`/button label and default-active
+  state moved (`wsp-tab-active` / `wsp-tab-panel-active` now live on `claudeweb`, not `claude`).
+- No server-side auth capability changed: this exposes the **existing** Bearer-API-key mechanism
+  through a different Claude UI, it does not add OAuth. See the "OAuth: Coming soon" note already on
+  the Configuration Generator (v2.9.0) for why a true zero-copy, zero-beta path would require a real
+  OAuth 2.1 authorization server implementation — out of scope here.
+- Source verified against Anthropic's own docs at time of writing: `/docs/connectors/custom/remote-
+  mcp#authenticating-with-request-headers` and `/docs/connectors/building/authentication`.
+
+### New — One-Click Automated Connector on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **Download button on every snippet** (all six static tabs plus the live generator): each
+  `.wsp-config-header` now holds a `.wsp-config-actions` pair — **Download** next to the existing
+  **Copy**. A new client-side `downloadFile(filename, content)` helper builds a throwaway `Blob` +
+  `<a download>` and clicks it, so one click writes the exact file (`claude_desktop_config.json`,
+  `mcp.json`, `config.toml`, `mcp_config.json`, `openclaw.json`, `opencode.json`) straight to disk —
+  nothing to select, nothing to paste. The generator's download button derives its filename live
+  from the currently-rendered snippet (`snip.filename.split("/").pop()`), so it always matches
+  whichever tool/auth combination is on screen.
+- **True one-click connect for Cursor**: Cursor supports a documented deep link,
+  `cursor://anysphere.cursor-deeplink/mcp/install?name=<slug>&config=<base64-of-{url,headers}>`
+  (https://cursor.com/docs/mcp/install-links), that opens Cursor directly and lets *it* write
+  `~/.cursor/mcp.json` — no config file to open or paste into at all. A new `.wsp-connect-callout` /
+  `.wsp-connect-btn` box surfaces this both on the static **Cursor** tab (link built server-side in
+  PHP from the already-known API key) and in the live generator (link rebuilt client-side on every
+  `render()`, shown only once a real Bearer or Basic auth header is available — i.e. immediately for
+  API Key, or once both Application Password fields are filled in).
+  - Caught and fixed during implementation: WordPress's `esc_url()` strips any URL protocol that
+    isn't in its default `wp_allowed_protocols()` list, which does not include `cursor` — echoing the
+    deep link through bare `esc_url()` would have silently mangled the scheme and left the button
+    dead. Fixed by passing the protocol explicitly: `esc_url( $cursor_deeplink, array( 'cursor',
+    'https', 'http' ) )`.
+  - No equivalent deep link exists yet for Claude Desktop, Codex, Antigravity, OpenClaw, or
+    OpenCode — none of them publish a documented one-click MCP-install protocol handler, so only
+    Cursor gets the connect button; the other five keep Download + Copy.
+- Purely additive: existing Copy-button behavior, tab switching, and the Configuration Generator's
+  snippet output (v2.9.0) are unchanged.
+- `AGENTS.md` "Connection page" section documents the new element IDs, JS helpers, and the
+  `esc_url()` protocol-allowlist gotcha for future agents.
+
+### New — Live Configuration Generator on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **A new `.wsp-gen-box` section** sits above the existing six static per-client tabs: pick an **AI Tool** (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) from a `<select>`, and an **Authentication Method** from a 3-way pill group (**API Key**, **Application Password**, **OAuth**). The output snippet re-renders live, entirely client-side, on every change — no page reload, no server round trip — with its own "Copy" button reusing the page's existing `copyText()` clipboard helper.
+- **API Key** (default, marked Recommended) reuses the same Bearer-token construction as the static tabs below it.
+- **Application Password** reveals a WordPress-Username + Application-Password input pair. Neither value is ever submitted to the server: the `Authorization: Basic <base64>` token is computed in the browser with `btoa()` and embedded literally into the generated snippet, the same way the API-key path already embeds its own secret directly (no `${VAR}` env interpolation, avoiding the known mcp-remote "missing env var" failure mode). For **Claude Desktop** specifically, the generated config's `env` block also lists `WP_API_URL` / `WP_API_USERNAME` / `WP_API_PASSWORD` as a human-readable record of the credential — these three keys are informational only; the actual transport is still the `mcp-remote` bridge to this plugin's own native `wsp-mcp/v1/mcp` endpoint, **not** a reintroduction of the `@automattic/mcp-wordpress-remote` package removed in v2.2 (see `[2.2.0]` below).
+- **OAuth** is shown as a selectable method — matching what modern MCP client pickers expose — but is **not implemented server-side** (`class-auth.php` has no OAuth flow). Selecting it swaps the code preview for a "coming soon" notice and disables the copy button, rather than generating a config that would silently fail to authenticate.
+- A conditional HTTPS notice appears under the Application Password fields only when the current admin page itself is served over plain HTTP on a non-local host, since WordPress core itself refuses to let such a site create Application Passwords.
+- `readme.txt` "Key features" and changelog updated; `AGENTS.md` "Connection page" section documents the new markup/JS contract for future agents.
 
 ### Security — Hardening of the native OAuth authorization server before first release
 
@@ -25,10 +136,6 @@ Pre-release review of the OAuth/Connectors work in this same branch. None of the
 
 ### Known gap
 - There is still **no admin screen listing registered OAuth clients or live tokens, and no per-connector revoke button** — the only controls are the global off switch and `revoke_everything()`. Tracked in `AGENTS.md` ("OAuth authorization server — security invariants"); should land before OAuth is promoted as the primary connection path.
-
----
-
-## [2.7.3] — 2026-09-10
 
 ### Fixed — stray output from other plugins/themes could corrupt the JSON response ("no tools available")
 
@@ -61,10 +168,6 @@ Pre-release review of the OAuth/Connectors work in this same branch. None of the
   plugin's main file that happens to load first, alphabetically or otherwise) — there is no earlier
   hook a regular, non-mu plugin has access to. Everything from `plugins_loaded` onward, which is
   where real-world stray output actually happens, is covered.
-
----
-
-## [2.7.2] — 2026-09-09
 
 ### Fixed — OAuth discovery on subdirectory installs ("connector has no tools available")
 
@@ -123,81 +226,6 @@ it will otherwise keep pointing every connector on the domain at whichever insta
   target through the matching guard and bail with its `WP_Error` before touching anything.
 - No existing tool, ability, or admin UI was removed or changed by this merge — additive only.
 
-## [2.11.0] — 2026-09-02
-
-### New — "Claude Connectors" tab on `MCP > Connection` (`includes/admin/connection-page.php`)
-- **Zero-config-file connection path**, now the default first tab (`data-tab="claudeweb"`, replacing
-  the old default-active state on the classic Claude Desktop tab). Claude's own **Customize >
-  Connectors > Add custom connector** screen — a different product surface from the
-  `claude_desktop_config.json` file, shared across claude.ai, Claude Desktop, and Claude mobile —
-  accepts a bare **Remote MCP server URL** plus a **Request header** (`static_headers`, beta) instead
-  of an OAuth flow or a locally-edited JSON file. This tab surfaces exactly the two values that
-  screen needs: `#wsp-code-ccurl` (the endpoint, same `$endpoint` used everywhere else on this page)
-  and `#wsp-code-ccheader` (`Bearer <api_key>`, ready to paste as the `Authorization` header value),
-  each with its own `makeCopyBtn()`-wired Copy button. No PHP/JS logic changed elsewhere — this is
-  additive markup only, reusing existing helpers.
-- **Two hard constraints called out directly on the tab**, since neither is something this plugin
-  can fix: (1) Claude's servers connect from Anthropic's cloud infrastructure, not the user's
-  machine, so the site must be reachable on the public internet — `localhost` / private-network
-  installs cannot use this path and still need the config-file tab. (2) The Request-headers field is
-  a beta Anthropic is rolling out gradually per-organization; accounts that don't have it yet won't
-  see the field in their Add-custom-connector dialog and should use the (now second, no-longer-
-  default) **Claude Desktop (config file)** tab instead.
-- The old Claude Desktop tab is unchanged in content — only its `id`/button label and default-active
-  state moved (`wsp-tab-active` / `wsp-tab-panel-active` now live on `claudeweb`, not `claude`).
-- No server-side auth capability changed: this exposes the **existing** Bearer-API-key mechanism
-  through a different Claude UI, it does not add OAuth. See the "OAuth: Coming soon" note already on
-  the Configuration Generator (v2.9.0) for why a true zero-copy, zero-beta path would require a real
-  OAuth 2.1 authorization server implementation — out of scope here.
-- Source verified against Anthropic's own docs at time of writing: `/docs/connectors/custom/remote-
-  mcp#authenticating-with-request-headers` and `/docs/connectors/building/authentication`.
-
----
-
-## [2.10.0] — 2026-09-02
-
-### New — One-Click Automated Connector on `MCP > Connection` (`includes/admin/connection-page.php`)
-- **Download button on every snippet** (all six static tabs plus the live generator): each
-  `.wsp-config-header` now holds a `.wsp-config-actions` pair — **Download** next to the existing
-  **Copy**. A new client-side `downloadFile(filename, content)` helper builds a throwaway `Blob` +
-  `<a download>` and clicks it, so one click writes the exact file (`claude_desktop_config.json`,
-  `mcp.json`, `config.toml`, `mcp_config.json`, `openclaw.json`, `opencode.json`) straight to disk —
-  nothing to select, nothing to paste. The generator's download button derives its filename live
-  from the currently-rendered snippet (`snip.filename.split("/").pop()`), so it always matches
-  whichever tool/auth combination is on screen.
-- **True one-click connect for Cursor**: Cursor supports a documented deep link,
-  `cursor://anysphere.cursor-deeplink/mcp/install?name=<slug>&config=<base64-of-{url,headers}>`
-  (https://cursor.com/docs/mcp/install-links), that opens Cursor directly and lets *it* write
-  `~/.cursor/mcp.json` — no config file to open or paste into at all. A new `.wsp-connect-callout` /
-  `.wsp-connect-btn` box surfaces this both on the static **Cursor** tab (link built server-side in
-  PHP from the already-known API key) and in the live generator (link rebuilt client-side on every
-  `render()`, shown only once a real Bearer or Basic auth header is available — i.e. immediately for
-  API Key, or once both Application Password fields are filled in).
-  - Caught and fixed during implementation: WordPress's `esc_url()` strips any URL protocol that
-    isn't in its default `wp_allowed_protocols()` list, which does not include `cursor` — echoing the
-    deep link through bare `esc_url()` would have silently mangled the scheme and left the button
-    dead. Fixed by passing the protocol explicitly: `esc_url( $cursor_deeplink, array( 'cursor',
-    'https', 'http' ) )`.
-  - No equivalent deep link exists yet for Claude Desktop, Codex, Antigravity, OpenClaw, or
-    OpenCode — none of them publish a documented one-click MCP-install protocol handler, so only
-    Cursor gets the connect button; the other five keep Download + Copy.
-- Purely additive: existing Copy-button behavior, tab switching, and the Configuration Generator's
-  snippet output (v2.9.0) are unchanged.
-- `AGENTS.md` "Connection page" section documents the new element IDs, JS helpers, and the
-  `esc_url()` protocol-allowlist gotcha for future agents.
-
----
-
-## [2.9.0] — 2026-09-01
-
-### New — Live Configuration Generator on `MCP > Connection` (`includes/admin/connection-page.php`)
-- **A new `.wsp-gen-box` section** sits above the existing six static per-client tabs: pick an **AI Tool** (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) from a `<select>`, and an **Authentication Method** from a 3-way pill group (**API Key**, **Application Password**, **OAuth**). The output snippet re-renders live, entirely client-side, on every change — no page reload, no server round trip — with its own "Copy" button reusing the page's existing `copyText()` clipboard helper.
-- **API Key** (default, marked Recommended) reuses the same Bearer-token construction as the static tabs below it.
-- **Application Password** reveals a WordPress-Username + Application-Password input pair. Neither value is ever submitted to the server: the `Authorization: Basic <base64>` token is computed in the browser with `btoa()` and embedded literally into the generated snippet, the same way the API-key path already embeds its own secret directly (no `${VAR}` env interpolation, avoiding the known mcp-remote "missing env var" failure mode). For **Claude Desktop** specifically, the generated config's `env` block also lists `WP_API_URL` / `WP_API_USERNAME` / `WP_API_PASSWORD` as a human-readable record of the credential — these three keys are informational only; the actual transport is still the `mcp-remote` bridge to this plugin's own native `wsp-mcp/v1/mcp` endpoint, **not** a reintroduction of the `@automattic/mcp-wordpress-remote` package removed in v2.2 (see `[2.2.0]` below).
-- **OAuth** is shown as a selectable method — matching what modern MCP client pickers expose — but is **not implemented server-side** (`class-auth.php` has no OAuth flow). Selecting it swaps the code preview for a "coming soon" notice and disables the copy button, rather than generating a config that would silently fail to authenticate.
-- A conditional HTTPS notice appears under the Application Password fields only when the current admin page itself is served over plain HTTP on a non-local host, since WordPress core itself refuses to let such a site create Application Passwords.
-- `readme.txt` "Key features" and changelog updated; `AGENTS.md` "Connection page" section documents the new markup/JS contract for future agents.
-
 ---
 
 ## [2.6.8] — 2026-08-12
@@ -242,6 +270,8 @@ it will otherwise keep pointing every connector on the domain at whichever insta
 - **Fix:** added `wsp_cf7_is_active()` and `wsp_wpforms_is_active()` stubs (return `true`) to `bin/lib-abilities.php`, alongside the existing ones. The generator now emits all groups; `patch-website.php` regenerates both the `ABILITIES` array and the `GROUPS` map, so the site picks up CF7 + WPForms automatically on the next `main` push. Dev-tooling only — no plugin runtime code, tool, or shipped-zip behavior changed (the plugin already registered these tools correctly at runtime).
 - **Guardrail:** documented in `AGENTS.md` ("Website sync automation") that any new plugin-gated group added to `registry.php` MUST get a matching active-check stub in `bin/lib-abilities.php`, or it will be dropped from the site.
 
+---
+
 ## [2.6.6] — 2026-07-27
 
 ### Added — Direct (base64) file upload for media (`includes/abilities/media.php`, `includes/tools/native-tools.php`, `includes/registry.php`)
@@ -249,6 +279,8 @@ it will otherwise keep pointing every connector on the domain at whichever insta
   - New optional inputs on `wsp_upload_media`: `data` (base64 string; a `data:<mime>;base64,` prefix is accepted and stripped) and `mime_type` (used to infer the extension when `data` has no data-URI prefix and `filename` has no extension). `url` is now optional — pass **either** `data` **or** `url`; `data` wins if both are present.
   - New callback `wsp_execute_upload_media_from_data()` in `media.php`: normalizes URL-safe/whitespaced base64, `base64_decode(..., true)` with strict validation, resolves a safe filename with an allowed image extension, writes the bytes to a `wp_tempnam()` temp file, and sideloads through `media_handle_sideload()` (same `upload_mimes` / `wp_check_filetype_and_ext` filters as the URL uploader). `wsp_execute_upload_media()` is no longer a thin wrapper — it routes to the base64 path when `data` is present, otherwise to `wsp_execute_upload_media_from_url()`.
   - **Security unchanged:** still requires `upload_files`; only image types (jpg, jpeg, png, gif, webp) are accepted; temp files are cleaned up on failure. No other tool, callback, or file behavior was modified.
+
+---
 
 ## [2.6.5] — 2026-07-21
 
@@ -307,6 +339,7 @@ it will otherwise keep pointing every connector on the domain at whichever insta
 - `get-integrations` requires `manage_options` (exposes reCAPTCHA key status); all entry tools require `wpcf7_edit_contact_forms`.
 
 ---
+
 ## [2.6.2] — 2026-07-20
 
 ### Changed — Gravity Forms documentation & version bump
@@ -382,10 +415,14 @@ _No behavioral code changes — the 18 Gravity Forms tools shipped in 2.6.1; thi
 ### Notes
 - The Claude Desktop connection snippet remains correct for macOS/Linux. Windows users whose Node.js lives under `C:\Program Files\nodejs` may hit a `cmd /C` quoting bug (`'C:\Program' is not recognized`) caused by the space in the path; the workaround is to wrap the launch as `"command": "cmd", "args": ["/c", "npx", …]`. Tracked in issue #13.
 
+---
+
 ## [2.4.0] — 2026-07-04
 
 ### Added
 - **OpenCode connection tab** on the **MCP > Connection** page (`includes/admin/connection-page.php`). Sixth per-client snippet, joining Claude Desktop / Cursor / Codex / Antigravity / OpenClaw. OpenCode connects natively over remote HTTP (no Node.js / mcp-remote bridge), using its `mcp.<name>.{ type: "remote", url, enabled, oauth, headers }` schema with the API key inlined in the `Authorization` header. The snippet is a **full-file** config (includes `$schema` and the top-level wrapper) so users can create a fresh `~/.config/opencode/opencode.json` and paste directly; instructions cover create-file → paste → restart. Server name auto-derives as `wsp-<host>`, consistent with the other tabs.
+
+---
 
 ## [2.3.1] — 2026-07-01
 
@@ -400,6 +437,8 @@ _No behavioral code changes — the 18 Gravity Forms tools shipped in 2.6.1; thi
 
 ### Changed
 - `Requires at least` header/readme value changed from `6.9.0` to major-only `6.9` per WordPress.org versioning rules (the minor is ignored).
+
+---
 
 ## [2.3.0] — 2026-06-30
 
@@ -615,3 +654,5 @@ Initial release. Registers WordPress content as MCP abilities via the WordPress 
 - Admin toggle UI (MCP > Settings) — per-ability on/off switches with write-action confirmation dialogs.
 - Central ability registry (`wsp_mcp_ability_registry()`) driving both admin UI and ability registration.
 - Dual-mode transport guard: `function_exists('wp_register_ability')` so the plugin degrades gracefully when the Abilities API is absent.
+
+---

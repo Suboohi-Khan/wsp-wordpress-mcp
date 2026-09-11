@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, model context protocol, woocommerce
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.7.1
+Stable tag: 2.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -149,26 +149,18 @@ https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
 
-= 2.7.3 =
+= 2.8.0 =
+* New: One-click Claude Connector sign-in. The plugin now runs its own OAuth 2.1 authorization server, so you can connect Claude by pasting only the server URL into Customize > Connectors > Add custom connector — no config file, no API key, no request header. Claude sends you to this site's own login page; whoever clicks Allow connects as themselves, and Claude can then do only what that WordPress account is permitted to do. **Off by default** — enable it from MCP > Connection. The existing API key and Application Password methods are unchanged and do not require it.
+* New: Analytics & Performance Dashboard in **MCP > Analytics** — summary cards for total requests, most-used tool, average response time, and error rate; a per-category tool-usage breakdown with lightweight CSS progress bars; and a recent-requests performance log. Built entirely on the existing Audit Log database (`wp_wsp_mcp_audit_log`), which now also records each request's ability category and execution duration in milliseconds — no external service involved. Restricted to administrators (`manage_options`).
+* New: "Claude Connectors" tab on **MCP > Connection**, now the first tab, covering the URL-only connection path above for claude.ai, Claude Desktop and Claude mobile (they share one Connectors screen). The classic config-file method is kept as its own tab.
+* New: Configuration Generator on **MCP > Connection** — pick an AI tool (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) and an authentication method, and the correct config snippet is built live in your browser with a one-click copy button. Application Password mode never sends your credentials to the server; the header is computed client-side.
+* New: **Download** button beside **Copy** on every snippet, saving the exact config file directly. Cursor users also get a **Connect Cursor Automatically** button using Cursor's official one-click MCP install link.
+* Security: The OAuth server ships hardened after a pre-release review — it is off until an administrator enables it, and switching it off disconnects anything already connected; approving a connector requires an account that can edit posts, so opening registration on your site does not open MCP access with it; the consent screen names the exact address access will be sent to and warns that an application's name is self-assigned and unverified; the consent and error pages cannot be framed (clickjacking); client registration is rate-limited and capped with automatic pruning; and replaying a spent refresh token revokes the whole token family.
+* Fixed: OAuth discovery on subdirectory installs (e.g. `https://example.com/test/`) could leave a connected connector with "no tools available." Discovery documents are now served at every URL spelling this install can actually reach, and the two-install-on-one-domain case is disambiguated with a base-path-aware issuer identity.
 * Fixed: On a site with other active plugins (however many, of whatever quality), a stray PHP notice/warning printed by one of them during an ordinary WordPress hook could land in front of this plugin's JSON response and break every MCP client's JSON parser — Claude showed the connector as connected but with "no tools available," and it could also trigger a "headers already sent" warning on this plugin's own responses. A new output-buffer guard opens the instant this plugin's own MCP or OAuth endpoint is requested and discards any such stray output right before the real JSON is sent, regardless of what else is installed on the site.
 
-= 2.7.2 =
-* Fixed: OAuth discovery on subdirectory installs (e.g. `https://example.com/test/`) could leave a connected connector with "no tools available." Discovery documents are now served at every URL spelling this install can actually reach, and the two-install-on-one-domain case is disambiguated with a base-path-aware issuer identity.
-
 = 2.7.1 =
-* Security: Fixed a broken access control issue reported by Patchstack (Ananda Dhakal) as "Authenticated (Contributor+) Broken Access Control", affecting WSP MCP <= 2.7.0, where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. New shared helper file `includes/abilities/guard.php`. Merged from the upstream project.
-
-= 2.11.0 =
-* New: "Claude Connectors" tab on **MCP > Connection** — the default, first tab now. Instead of editing `claude_desktop_config.json`, paste the server URL directly into Claude's own Customize > Connectors > Add custom connector screen (claude.ai, Claude Desktop, and Claude mobile all share it), set Authentication to None, and add one Request header (`Authorization`) with the value shown. No config file, no JSON, nothing to merge. Requires the site to be reachable on the public internet (Claude's servers cannot reach localhost), and Claude's "Request headers" field is currently a beta rolling out gradually — the old config-file method is kept as its own tab for accounts that don't have it yet.
-
-= 2.10.0 =
-* New: One-click automated connector on **MCP > Connection**. A **Download** button now sits beside **Copy** on every snippet (all six client tabs plus the live generator) — it saves the exact config file directly, no copy-paste required. Cursor users additionally get a **Connect Cursor Automatically** button using Cursor's official one-click MCP install link, which opens Cursor and adds the server for you with no config file to open or edit at all.
-
-= 2.9.0 =
-* New: Configuration Generator on **MCP > Connection** — pick an AI tool (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) and an authentication method (API Key or Application Password), and the correct config snippet is built live in your browser, with a one-click copy button. Application Password mode never sends your credentials to the server — the header is computed client-side. OAuth is shown as a selectable method with a "Coming soon" state since it is not yet implemented server-side.
-
-= 2.8.0 =
-* New: Analytics & Performance Dashboard in **MCP > Analytics** — summary cards for total requests, most-used tool, average response time, and error rate; a per-category tool-usage breakdown with lightweight CSS progress bars; and a recent-requests performance log. Built entirely on the existing Audit Log database (`wp_wsp_mcp_audit_log`), which now also records each request's ability category and execution duration in milliseconds — no external service involved. Restricted to administrators (`manage_options`).
+* Security: Fixed a broken access control issue reported by Patchstack (Ananda Dhakal) as "Authenticated (Contributor+) Broken Access Control", affecting WSP MCP <= 2.7.0, where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. New shared helper file `includes/abilities/guard.php`.
 
 = 2.7.0 =
 * New: Full Audit Log. Every MCP `tools/call` request is now recorded in a dedicated, self-hosted database table (`wp_wsp_mcp_audit_log`) — tool name, timestamp, acting user, request IP, and outcome (success, denied, or error). No external API or paid service is involved.
@@ -256,3 +248,8 @@ https://youtu.be/hxhjs3IUYQE
 
 = 1.2.0 =
 * Elementor abilities, modular architecture, auto config generator.
+
+== Upgrade Notice ==
+
+= 2.8.0 =
+Adds one-click Claude Connector sign-in (OAuth), an Analytics dashboard, and a configuration generator. OAuth is OFF by default and must be enabled from MCP > Connection. No action needed if you connect with an API key or Application Password.
