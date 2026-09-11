@@ -2,7 +2,7 @@
 
 > **By [WebSensePro](https://websensepro.com) — Official Shopify Partner & WordPress Agency**
 
-[![Version](https://img.shields.io/badge/Version-2.7.1-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
+[![Version](https://img.shields.io/badge/Version-2.8.0-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
 [![YouTube](https://img.shields.io/badge/YouTube-140K%2B%20Subscribers-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/websensepro)
 [![License](https://img.shields.io/badge/License-GPL%202.0-green?style=for-the-badge)](LICENSE)
 
@@ -13,6 +13,17 @@
 [![WSP WordPress MCP — Full Tutorial](https://img.youtube.com/vi/1hGSUAdRxiU/maxresdefault.jpg)](https://youtu.be/1hGSUAdRxiU)
 
 ---
+
+## ✨ What's New in v2.8.0
+
+- 🔗 **One-click Claude Connector sign-in** — the plugin now runs its own **OAuth 2.1 authorization server**, so you can connect Claude by pasting only the server URL into **Customize > Connectors > Add custom connector** — no config file, no API key, no request header. Claude sends you to this site's own login page; whoever clicks **Allow** connects as themselves, and Claude can then do only what that WordPress account is permitted to do. **Off by default** — enable it from **MCP > Connection**. The existing API key and Application Password methods are unchanged and do not require it.
+- 📊 **Analytics & Performance Dashboard** — new **MCP > Analytics** page with summary cards for total requests, most-used tool, average response time, and error rate; a per-category tool-usage breakdown with lightweight CSS progress bars; and a recent-requests performance log. Built entirely on the existing Audit Log table (`wp_wsp_mcp_audit_log`), which now also records each request's ability category and execution duration in milliseconds — no external service involved. Restricted to administrators (`manage_options`).
+- 🧭 **"Claude Connectors" tab on MCP > Connection** — now the first tab, covering the URL-only connection path for claude.ai, Claude Desktop, and Claude mobile (they share one Connectors screen). The classic config-file method is kept as its own tab.
+- ⚙️ **Configuration Generator** — pick an AI tool (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) and an authentication method, and the correct config snippet is built live in your browser with a one-click copy button. Application Password mode never sends your credentials to the server; the header is computed client-side.
+- ⬇️ **Download button on every snippet** — beside **Copy**, saving the exact config file directly. Cursor users also get a **Connect Cursor Automatically** button using Cursor's official one-click MCP install link.
+- 🔒 **Hardened OAuth server** — ships after a pre-release review: off until an administrator enables it, and switching it off disconnects anything already connected; approving a connector requires an account that can edit posts, so opening registration on your site does not open MCP access with it; the consent screen names the exact address access will be sent to and warns that an application's name is self-assigned and unverified; consent and error pages cannot be framed (clickjacking); client registration is rate-limited and capped with automatic pruning; and replaying a spent refresh token revokes the whole token family.
+- 🐛 **OAuth discovery on subdirectory installs — fixed** — installs like `https://example.com/test/` could leave a connected connector with "no tools available." Discovery documents are now served at every URL spelling the install can actually reach, and the two-installs-on-one-domain case is disambiguated with a base-path-aware issuer identity.
+- 🐛 **Stray output from other plugins breaking JSON responses — fixed** — a PHP notice/warning printed by any other active plugin during an ordinary WordPress hook could land in front of this plugin's JSON response and break every MCP client's parser (Claude showed the connector as connected but with "no tools available," and it could trigger a "headers already sent" warning). A new output-buffer guard opens the instant this plugin's own MCP or OAuth endpoint is requested and discards any such stray output right before the real JSON is sent, regardless of what else is installed.
 
 ## ✨ What's New in v2.7.1
 
@@ -217,10 +228,11 @@ New: Direct file upload for media. wsp_upload_media (Upload Media) now accepts b
 
 1. Install & activate this plugin
 2. Go to **MCP > Settings** in wp-admin and enable the abilities you need
-3. Go to **MCP > Connection** and pick your client tab (Claude Desktop, Cursor, Codex, Antigravity, or OpenClaw)
-4. Copy the snippet — the endpoint URL and API key are already filled in — and paste it into your client's config
-5. Reconnect / restart the client and start prompting your AI agent
-6. Review what your agent actually did under **MCP > Audit Log**
+3. Go to **MCP > Connection** and pick your client tab:
+   - **Claude (claude.ai, Desktop, or mobile):** enable the OAuth server on the **Claude Connectors** tab, then paste just the server URL into **Customize > Connectors > Add custom connector** and sign in with your WordPress account
+   - **Everything else (Cursor, Codex, Antigravity, OpenClaw, OpenCode):** use the Configuration Generator, then **Copy** or **Download** the snippet — the endpoint URL and credentials are already filled in — and paste it into your client's config (Cursor also gets a one-click **Connect Cursor Automatically** button)
+4. Reconnect / restart the client and start prompting your AI agent
+5. Review what your agent actually did under **MCP > Audit Log**, and check usage and response times under **MCP > Analytics**
 
 > **Upgrading from before v2.0?** As of v2.2 the legacy MCP-Adapter / Abilities-API path and the **MCP > Config Files** page have been removed. Re-create your connection using the native endpoint on **MCP > Connection**.
 
