@@ -30,6 +30,17 @@ class WSP_MCP_Server {
 	public static function init() {
 		wsp_mcp_register_native_tools();
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
+		// Discards any stray output another active plugin/theme printed during
+		// this request (see includes/response-guard.php) the instant before WP
+		// core echoes the real JSON-RPC body — a no-op on every REST response
+		// that isn't ours, so this is safe to leave unconditional site-wide.
+		add_filter( 'rest_pre_echo_response', array( __CLASS__, 'flush_output_guard' ) );
+	}
+
+	/** @see wsp_mcp_output_guard_flush() */
+	public static function flush_output_guard( $result ) {
+		wsp_mcp_output_guard_flush();
+		return $result;
 	}
 
 	/**
@@ -194,41 +205,71 @@ class WSP_MCP_Server {
 
 	/** tools/call: capability-gate then invoke the wrapped callback. */
 	private static function do_tools_call( $id, $params ) {
-		$name = isset( $params['name'] ) ? $params['name'] : '';
-		$args = isset( $params['arguments'] ) && is_array( $params['arguments'] ) ? $params['arguments'] : array();
+		$name  = isset( $params['name'] ) ? $params['name'] : '';
+		$args  = isset( $params['arguments'] ) && is_array( $params['arguments'] ) ? $params['arguments'] : array();
+		$start = microtime( true );
 
 		$enabled = self::enabled_tools();
 		if ( ! isset( $enabled[ $name ] ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, 'Unknown or disabled tool.' );
+			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, 'Unknown or disabled tool.', self::elapsed_ms( $start ), '' );
 			return self::rpc_error( $id, -32602, 'Unknown or disabled tool: ' . $name, 200 );
 		}
-		$spec = $enabled[ $name ];
+		$spec     = $enabled[ $name ];
+		$category = self::tool_category( $spec );
 
 		$cap = WSP_MCP_Auth::require_cap( $spec['capability'] );
 		if ( is_wp_error( $cap ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_DENIED, $cap->get_error_message() );
+			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_DENIED, $cap->get_error_message(), self::elapsed_ms( $start ), $category );
 			return self::tool_text( $id, 'Error: ' . $cap->get_error_message(), true );
 		}
 
 		if ( ! is_callable( $spec['callback'] ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, 'Tool has no handler.' );
+			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, 'Tool has no handler.', self::elapsed_ms( $start ), $category );
 			return self::tool_text( $id, 'Error: tool has no handler.', true );
 		}
 
 		try {
 			$result = call_user_func( $spec['callback'], $args );
 		} catch ( \Throwable $e ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, $e->getMessage() );
+			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, $e->getMessage(), self::elapsed_ms( $start ), $category );
 			return self::tool_text( $id, 'Error: ' . $e->getMessage(), true );
 		}
 
 		if ( is_wp_error( $result ) ) {
-			WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_ERROR, $result->get_error_message() );
+			// Object-level guards (guard.php, acf.php, yoast.php, rankmath.php, …)
+			// return WP_Error( 'forbidden', … ) when the caller lacks permission
+			// on the specific object — log those as authorization denials, not
+			// generic errors, so they surface correctly for security auditing.
+			$status = ( 'forbidden' === $result->get_error_code() ) ? WSP_MCP_Audit_Log::STATUS_DENIED : WSP_MCP_Audit_Log::STATUS_ERROR;
+			WSP_MCP_Audit_Log::log( $name, $status, $result->get_error_message(), self::elapsed_ms( $start ), $category );
 			return self::tool_text( $id, 'Error: ' . $result->get_error_message(), true );
 		}
 
-		WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_SUCCESS );
+		WSP_MCP_Audit_Log::log( $name, WSP_MCP_Audit_Log::STATUS_SUCCESS, '', self::elapsed_ms( $start ), $category );
 		return self::tool_text( $id, wp_json_encode( $result, JSON_PRETTY_PRINT ), false );
+	}
+
+	/** Milliseconds elapsed since $start (a microtime(true) value), rounded to the nearest int. */
+	private static function elapsed_ms( $start ) {
+		return (int) round( ( microtime( true ) - $start ) * 1000 );
+	}
+
+	/**
+	 * Map a registered tool spec to its ability-registry group (e.g. "Elementor",
+	 * "WooCommerce", "Posts") for the Analytics usage breakdown. Falls back to ''
+	 * (displayed as "Uncategorized") when the registry is unavailable or the tool
+	 * has no matching entry.
+	 */
+	private static function tool_category( array $spec ) {
+		$enable_key = isset( $spec['enable_key'] ) ? $spec['enable_key'] : '';
+		if ( '' === $enable_key || ! function_exists( 'wsp_mcp_ability_registry' ) ) {
+			return '';
+		}
+		static $registry = null;
+		if ( null === $registry ) {
+			$registry = wsp_mcp_ability_registry();
+		}
+		return isset( $registry[ $enable_key ]['group'] ) ? $registry[ $enable_key ]['group'] : '';
 	}
 
 	/** DELETE: terminate a session. */

@@ -53,6 +53,24 @@ enforced inside the handler). Speaks Streamable HTTP + JSON-RPC 2.0: `initialize
 client's `protocolVersion` if recognized; supported = `2024-11-05`/`2025-03-26`/`2025-06-18`/`2025-11-25`),
 `notifications/initialized`, `tools/list`, `tools/call`, `ping`, empty `resources/list` & `prompts/list`.
 
+**`includes/response-guard.php` (v2.7.3, required before every other include):** a site running
+this plugin can have any number of *other* plugins active, of any quality — this plugin can't
+control that. `wsp_mcp_output_guard_start()` opens an output buffer the instant this file is
+`require`d (top of the main plugin file, before anything else loads) whenever
+`wsp_mcp_is_own_endpoint_request()` says the raw request URI is this plugin's own MCP REST route or
+one of the OAuth discovery/registration/authorize/token endpoints — a no-op on every other request.
+`wsp_mcp_output_guard_flush()` discards just that one buffer level right before the real response is
+sent, so a stray PHP notice/warning some other plugin printed during `init`/`wp_loaded`/etc. can
+never land in front of the JSON body (which breaks every MCP client's JSON parser and surfaces in
+Claude as "connected" with "no tools available") and never causes a "headers already sent" warning
+on this plugin's own `header()` calls. Wired at exactly two choke points: `WSP_MCP_Server`'s
+`rest_pre_echo_response` filter (covers every JSON-RPC response, since all of them are
+`WP_REST_Response` objects — including the 401 challenge in `class-auth.php`) and
+`WSP_MCP_OAuth_Server::send_json()` (the single function every OAuth JSON response goes through).
+Cannot catch output printed before this plugin's own file is included — there is no earlier hook a
+regular (non-mu) plugin has — but that covers the rare case; everything from `plugins_loaded` onward,
+where real-world stray output actually happens, is covered.
+
 **Server-layer files (`includes/server/`):**
 - `class-mcp-server.php` — `WSP_MCP_Server`: REST route, JSON-RPC dispatch, in-memory tool
   registry (`register_tool()`), Origin validation, rate limiting (120/60s), `no-store` headers.
@@ -65,8 +83,18 @@ client's `protocolVersion` if recognized; supported = `2024-11-05`/`2025-03-26`/
   `> 0` → accept, `0` → ambiguous, resolved with a `SELECT 1 … expires_at > NOW` existence check.
 - `class-auth.php` — `WSP_MCP_Auth`: accepts **(1)** Application Password (HTTP Basic, validated
   by WP core), **(2)** plugin API key via `Authorization: Bearer <key>`, **(3)** same key via
-  `X-WSP-MCP-API-Key`. API key stored in option `wsp_mcp_api_key` (admin-only → mapped to lowest-ID
-  admin so capability checks resolve). `require_cap()` gates each tool.
+  `X-WSP-MCP-API-Key`, **(4)** an OAuth access token, also as `Authorization: Bearer <token>`, tried
+  whenever a bearer value isn't the static key. API key stored in option `wsp_mcp_api_key`
+  (admin-only → mapped to lowest-ID admin so capability checks resolve); an OAuth token instead
+  binds to the specific user who approved consent. `require_cap()` gates each tool. Both the OAuth
+  token path and the `resource_metadata` pointer in the 401 challenge are gated on
+  `wsp_mcp_oauth_is_enabled()` — see the OAuth section below.
+- `class-oauth-server.php` / `class-oauth-store.php` — `WSP_MCP_OAuth_Server` /
+  `WSP_MCP_OAuth_Store`: a native OAuth 2.1 authorization server (RFC 8414 + 9728 discovery, RFC
+  7591 DCR, RFC 6749 + PKCE S256) powering Claude's "paste a URL only" Connector flow. Endpoints are
+  matched against the raw request path on `init` priority 0, not through the REST API. Three tables
+  (`wsp_mcp_oauth_clients` / `_codes` / `_tokens`), daily cron `wsp_mcp_oauth_cleanup`. **Read the
+  invariants below before touching either file.**
 
 **Tools (`includes/tools/native-tools.php`):** `wsp_mcp_register_native_tools()` registers every
 tool with `WSP_MCP_Server::register_tool($name, $spec)`. It **reuses the existing
@@ -86,6 +114,55 @@ regenerate, and per-client tabbed config snippets for Claude Desktop / Cursor / 
 OpenClaw / OpenCode — all native, no MCP Adapter). `dependency.php` provides
 `wsp_mcp_abilities_api_available()` (gates dual-mode) and `wsp_mcp_transport_available()` (always
 true in v2.0).
+
+### OAuth authorization server — security invariants (do not regress these)
+
+The OAuth server is the plugin's only **unauthenticated, publicly-reachable** surface: it accepts
+client registrations from strangers and mints credentials for whoever clicks Allow. Each rule below
+exists because its absence is an exploitable bug, not a style preference.
+
+1. **Off unless an admin opted in.** Option `wsp_mcp_oauth_enabled` (constant
+   `WSP_MCP_OAUTH_OPTION`), default `false`, read via `wsp_mcp_oauth_is_enabled()`.
+   `WSP_MCP_OAuth_Server::init()` returns early when off, so nothing is routed and no discovery
+   document is served. `class-auth.php` gates the OAuth token path and the 401 `resource_metadata`
+   pointer on the same check, so switching it off also stops honouring already-issued tokens.
+   Toggled from MCP > Connection (`admin_post_wsp_mcp_toggle_oauth`, nonce + `manage_options`);
+   turning it off calls `WSP_MCP_OAuth_Store::revoke_everything()`. **Never make this default-on** —
+   a plugin update must not publish login endpoints on a site that didn't ask for them.
+2. **Consent requires a real capability, not just a login.** `handle_authorize()` checks
+   `wsp_mcp_oauth_min_capability()` (default `edit_posts`, filterable) before rendering *or*
+   accepting the consent form. Login alone is not enough: six tools register with
+   `'capability' => ''`, and `wsp_get_posts` with `status=all` returns every draft/pending/scheduled
+   post with no author filter — so on a site with open registration, "any logged-in user" would mean
+   any visitor who signs up can read unpublished content through Claude.
+3. **The consent screen must name the destination.** `client_name` comes from the unauthenticated
+   registration endpoint — it is a self-assigned label, not an identity. `render_consent_page()`
+   therefore shows the redirect **host** and full URI prominently and states in the page that the
+   name is unverified. Without that, registering a client called "WordPress Security Update" that
+   points at an attacker callback turns one Allow click by a logged-in editor into a token bound to
+   their account.
+4. **No OAuth HTML page may be frameable.** `render_consent_page()` and `render_error_page()` both
+   call `send_frame_protection_headers()` (`X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` +
+   `Referrer-Policy`). These render on `init`, outside wp-admin, so core's own framing protection
+   never applies — without the headers the Allow button is clickjackable.
+5. **Registration is throttled and bounded.** `handle_register()` calls
+   `enforce_rate_limit( 'register', … )` (5 per 10 min per IP — its own bucket, separate from the
+   token endpoint's deliberately generous 60/60s, which has to absorb Anthropic's shared egress
+   range) and refuses past `WSP_MCP_OAuth_Store::MAX_CLIENTS`, pruning abandoned rows first.
+   `prune_unused_clients()` (also on the daily cron) deletes clients older than `UNUSED_CLIENT_TTL`
+   that never produced a token, so junk registrations can't hold the ceiling against real clients.
+6. **Refresh-token replay revokes the family.** `rotate_refresh_token()` revokes the presented pair
+   on use; if a *spent* (already-rotated) token is presented again, `find_rotated_token()` detects it
+   and `revoke_all_for( client, user )` kills every live token for that pair (RFC 9700 §4.14.2).
+7. **Unchanged invariants from the original implementation:** redirect_uri is exact-matched against
+   the registered allowlist *before* any redirect happens (canonicalized on both sides;
+   userinfo/fragment rejected); `wp_redirect()` not `wp_safe_redirect()` is correct **only** because
+   of that match; PKCE S256 is mandatory and compared with `hash_equals()`; codes are single-use and
+   deleted on first sight; tokens are stored as SHA-256 hashes only.
+
+> **Still outstanding (not fixed here):** there is no admin screen listing registered clients or live
+> tokens and no per-connector revoke button — the only controls are the global off switch and
+> `revoke_everything()`. Add one before advertising OAuth as the primary connection path.
 
 ### How to add a NEW MCP tool (v2.0)
 
@@ -171,6 +248,10 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
     ├── readme.txt              ← WP.org readme (v2.0)
     ├── uninstall.php           ← deletes wsp_mcp_* options + drops sessions table
     └── includes/
+        ├── response-guard.php  ← output-buffer guard (v2.7.3): swallows stray output from other
+        │                          active plugins/themes on this plugin's own MCP/OAuth requests so
+        │                          it can never corrupt the JSON response — required first, started
+        │                          before any other include
         ├── dependency.php      ← stub: wsp_mcp_transport_available() (always true) — kept for back-compat
         ├── registry.php        ← central ability registry + settings helpers
         ├── server/             ← v2.0 native MCP server
@@ -202,7 +283,11 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — dev 
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 
 **Other persistent state:** option `wsp_mcp_api_key` (native API key), option `wsp_mcp_db_version`
-(migration gate), DB table `{prefix}wsp_mcp_sessions`, cron event `wsp_mcp_session_cleanup`.
+(migration gate), option `wsp_mcp_oauth_enabled` (OAuth opt-in, **default off**), DB tables
+`{prefix}wsp_mcp_sessions`, `{prefix}wsp_mcp_audit_log`, `{prefix}wsp_mcp_oauth_clients`,
+`{prefix}wsp_mcp_oauth_codes`, `{prefix}wsp_mcp_oauth_tokens`, cron events
+`wsp_mcp_session_cleanup`, `wsp_mcp_audit_log_cleanup`, `wsp_mcp_oauth_cleanup`.
+All of the above are removed in `uninstall.php`.
 
 ---
 
@@ -609,10 +694,26 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
 - **Primary, native-transport page (v2.0).** Top card shows the native endpoint
   (`rest_url('wsp-mcp/v1/mcp')`) + API key with a Regenerate button (nonce-protected admin-post action
   `wsp_mcp_regenerate_key` → `WSP_MCP_Auth::regenerate_api_key()`).
-- Six tabbed, copy-to-clipboard snippets, all pointing at the native endpoint with the **API key
-  hardcoded into the auth header** (no `${VAR}` env interpolation — avoids the mcp-remote "missing env
-  var" failure). Server name auto-derives as `wsp-<host>`:
-  - **Claude Desktop** — `mcpServers` + `npx -y mcp-remote <url> --header "Authorization: Bearer <key>"` (stdio bridge, needs Node.js; Claude Desktop config files don't support remote HTTP directly).
+- **Seven tabs** total: the zero-config-file "Claude Connectors" tab (below) plus six tabbed,
+  copy-to-clipboard snippets, all pointing at the native endpoint with the **API key hardcoded into
+  the auth header** (no `${VAR}` env interpolation — avoids the mcp-remote "missing env var"
+  failure). Server name auto-derives as `wsp-<host>`:
+  - **Claude Connectors (v2.11.0, default-active tab, `#wsp-tab-claudeweb`):** not a config-file
+    snippet at all — Claude's **Customize > Connectors > Add custom connector** screen (a different
+    product surface from `claude_desktop_config.json`, shared by claude.ai/Desktop/mobile) takes a
+    bare **Remote MCP server URL** + a **Request header** instead of a file to edit. The tab shows
+    two copyable values: `#wsp-code-ccurl` (`$endpoint`) and `#wsp-code-ccheader` (`Bearer
+    <api_key>`, paste as the value of an `Authorization` header, Authentication set to `None`).
+    Wired with the same `makeCopyBtn()` helper as everything else, ids `wsp-copy-ccurl` /
+    `wsp-copy-ccheader`. Two constraints called out inline (not fixable from this plugin's side):
+    the site must be publicly reachable (Claude's cloud can't reach `localhost`), and Claude's
+    Request-headers field is a beta rolling out gradually — accounts without it yet fall back to the
+    **Claude Desktop (config file)** tab, which is unchanged, just no longer default-active.
+    Verified against Anthropic's docs (`/docs/connectors/custom/remote-mcp
+    #authenticating-with-request-headers`, `/docs/connectors/building/authentication`) before
+    shipping — do **not** invent a different header/UI flow without re-checking those pages, this
+    surface changes independently of this plugin.
+  - **Claude Desktop (`#wsp-tab-claude`)** — `mcpServers` + `npx -y mcp-remote <url> --header "Authorization: Bearer <key>"` (stdio bridge, needs Node.js; Claude Desktop config files don't support remote HTTP directly).
   - **Cursor** — native remote HTTP: `mcpServers.<name>.{ url, headers: { Authorization: "Bearer <key>" } }` (`~/.cursor/mcp.json`).
   - **Codex** — native streamable HTTP TOML: `[mcp_servers.<name>]` `url` + `http_headers = { "Authorization" = "Bearer <key>" }` (`~/.codex/config.toml`).
   - **Antigravity** — native remote HTTP, but the URL key is **`serverUrl`** (not `url`): `mcpServers.<name>.{ serverUrl, headers }` (`~/.gemini/config/mcp_config.json`).
@@ -624,6 +725,72 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
   Clipboard API is undefined on plain-HTTP hosts (e.g. `http://*.local` dev sites), where the old
   direct call threw synchronously and the buttons silently did nothing.
 - Same `.wsp-layout` / `.wsp-main` / `.wsp-side` two-column shell as the Settings page (v2.6.7).
+- **Configuration Generator (v2.9.0):** a new `.wsp-gen-box` section sits between the facts table and
+  the six static tabs. Tool `<select>` + a 3-way auth-method pill group (`API Key` / `Application
+  Password` / `OAuth`) drive a live, client-side-only preview (`#wsp-gen-code`) with its own copy
+  button (`#wsp-gen-copy`), re-rendered on every `change`/`input` event — no page reload, no server
+  round trip. Data needed by the JS (`endpoint`, `apiKey`, `connSlug`, `siteUrl`) is emitted once as
+  `window.WSP_MCP_GEN` via an inline `<script>` in the page markup (JSON-encoded with
+  `wp_json_encode()`, which escapes slashes by default so `</script>` cannot break out).
+  - **API Key** (default/recommended): identical output to the matching static tab below it — the
+    Bearer key is embedded directly in the header, same as the rest of the page.
+  - **Application Password:** reveals a WordPress-Username + Application-Password pair of inputs
+    (`#wsp-gen-username` / `#wsp-gen-password`, `type=password`). Nothing in these fields is ever
+    submitted to the server — the Basic-auth token is computed in-browser with `btoa()` and embedded
+    literally into the generated config's `--header`/`headers` value, matching how the API-key path
+    already embeds its secret directly rather than relying on `${VAR}` interpolation. For Claude
+    Desktop specifically, the generated `env` block also carries `WP_API_URL` / `WP_API_USERNAME` /
+    `WP_API_PASSWORD` as a human-readable record of the credential — those three keys are cosmetic
+    only, nothing in this plugin's own transport reads them back. **Do not resurrect this as a reason
+    to depend on `@automattic/mcp-wordpress-remote`** — the actual bridge is still `mcp-remote` →
+    the native `wsp-mcp/v1/mcp` endpoint (see the removed-in-v2.2 note above).
+    Below the HTTPS-only note (`#wsp-gen-apppw-notice`) is shown only when `location.protocol` is
+    plain HTTP and the host isn't `localhost`/`127.0.0.1`, since WP core itself refuses to let a
+    non-HTTPS, non-local site create Application Passwords.
+  - **OAuth:** selectable (so the picker matches what other modern MCP integrations expose) but
+    **not implemented server-side** — `class-auth.php` has no OAuth flow. Selecting it swaps the code
+    box for a "coming soon" notice (`#wsp-gen-oauth-note`) and disables the copy button. If OAuth
+    support is ever added to `WSP_MCP_Auth`, wire a real branch into `buildSnippet()`/`authHeader()`
+    here instead of leaving the placeholder.
+- **One-Click Automated Connector (v2.10.0):** removes the manual copy-paste step entirely, on both
+  the six static tabs and the live generator.
+  - **Download button:** every `.wsp-config-header` now wraps its buttons in a `.wsp-config-actions`
+    flex row — a new **Download** button sits beside **Copy**. Client-side `downloadFile(filename,
+    content)` builds a throwaway `Blob` + `<a download>` and clicks it, so one click writes the exact
+    file to the browser's download location — nothing to select, nothing to paste. `makeDownloadBtn(
+    btnId, codeId, filename)` wires the six static-tab buttons (`#wsp-download-claude/cursor/codex/
+    antigravity/openclaw/opencode` → `claude_desktop_config.json` / `mcp.json` / `config.toml` /
+    `mcp_config.json` / `openclaw.json` / `opencode.json`); the generator's own `#wsp-gen-download`
+    button reuses the same `downloadFile()` helper but derives its filename live from
+    `snip.filename.split("/").pop()` each render (the on-screen label still shows the full
+    `~/.cursor/mcp.json`-style path — browsers can't pick a destination *directory*, only a
+    filename, so the download uses the basename).
+  - **Cursor one-click connect:** Cursor supports a documented deep link —
+    `cursor://anysphere.cursor-deeplink/mcp/install?name=<slug>&config=<base64>` (see
+    https://cursor.com/docs/mcp/install-links) — where `config` is the **base64 of the bare server
+    object** (`{ url, headers }`, *not* wrapped in `{ "<name>": {...} }` — the name is carried
+    separately in the `name` param). Clicking it opens Cursor, which shows its own install-confirm
+    dialog and writes `~/.cursor/mcp.json` itself — no file to open or paste into at all. A
+    `.wsp-connect-callout` box with a `.wsp-connect-btn` link renders this:
+    - On the static **Cursor** tab, the href is built server-side in PHP (`$cursor_deeplink`,
+      computed right after `$cursor_json`) since the API key is already known.
+      **Gotcha:** `esc_url()` strips any protocol not in `wp_allowed_protocols()` by default, which
+      does **not** include `cursor` — echoing `esc_url( $cursor_deeplink )` bare would have silently
+      mangled the scheme and dead-ended the button. Fixed by passing the protocol allowlist
+      explicitly: `esc_url( $cursor_deeplink, array( 'cursor', 'https', 'http' ) )`. Any future
+      custom-scheme link on this page needs the same third argument.
+    - In the **generator**, `#wsp-gen-connect-callout` / `#wsp-gen-connect-btn` are hidden by default
+      and only shown when `tool === "cursor"` **and** `authHeader(method)` returns a real (non-null,
+      non-placeholder) header — i.e. API Key always qualifies, Application Password only once both
+      credential fields are filled in. `buildCursorDeeplink(name, endpoint, header)` (uses the
+      existing `b64()` helper) rebuilds the `href` on every `render()` call, same lifecycle as
+      `buildSnippet()`. Setting `.href` via JS is not passed through `esc_url()`/kses, so no
+      protocol-allowlist issue there — only the PHP-side echo needed the fix above.
+    - No equivalent deep link is wired for the other five clients — Claude Desktop, Codex,
+      Antigravity, OpenClaw and OpenCode have no publicly documented one-click MCP-install protocol
+      handler as of this writing. Don't invent one; if a client adds official support later, follow
+      the same pattern (verify the exact scheme/param shape against that vendor's docs before
+      shipping — see the Cursor link above for the level of confirmation expected).
 
 ### Promo cards — `promo-cards.php` (v2.6.7)
 

@@ -8,12 +8,195 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.7.1] — 2026-09-02
+## [2.7.4] — 2026-09-11
 
-### Security — Object-level authorization on post/page/media write tools (`includes/abilities/guard.php` — new file, `includes/abilities/posts.php`, `includes/abilities/pages.php`, `includes/abilities/media.php`)
-- **Reported by Patchstack (Ananda Dhakal): "Authenticated (Contributor+) Broken Access Control", WSP MCP `<= 2.7.0`.** The native tool registry records one broad primitive capability per tool and `do_tools_call()` checks only that via `require_cap()` before invoking the callback. `wsp_update_post` asked only for `edit_posts`, `wsp_delete_post` only for `delete_posts` — both of which a stock Contributor holds. Application Password callers authenticate as their real low-privileged user (`class-auth.php` accepts any core-established login and, unlike the API-key path, does **not** map to an admin), so the callbacks in `posts.php` / `pages.php` / `media.php` passed a caller-chosen object ID straight to `wp_update_post()` / `wp_trash_post()` / `wp_delete_attachment()` with no ownership, post-type or status-transition check. A Contributor could overwrite, publish or unpublish an Administrator- or Editor-owned post; modify a page despite lacking `edit_pages`; set `status=publish` despite lacking `publish_posts`; and (where enabled) trash any post object by ID.
-- **Fix:** new `includes/abilities/guard.php` exposes `wsp_mcp_guard_edit_post()`, `wsp_mcp_guard_delete_post()` and `wsp_mcp_guard_post_status()`. Every write callback that takes a caller-supplied object ID — `wsp_execute_update_post`, `wsp_execute_delete_post`, `wsp_execute_update_page`, `wsp_execute_delete_page`, `wsp_execute_update_media`, `wsp_execute_delete_media`, `wsp_execute_set_featured_image` — now loads the object, enforces the `edit_post` / `delete_post` **meta** capability for that specific ID, restricts the tool to its expected post type (`post` / `page` / `attachment`), and rejects a `publish`, `future` or `private` status transition unless the caller holds the post type's `publish_posts` capability. Denials return a `WP_Error`, which the server surfaces as a tool error and the audit log records as `error`. This matches what WordPress core's own REST controllers check. `wsp_yoast_update_seo` / `wsp_rankmath_update_seo` already performed the `edit_post` check and are unchanged.
-- No API change for legitimate callers: an Editor or Administrator (or an API-key request mapped to admin) passes every new check exactly as before.
+### Security — Hardening of the native OAuth authorization server before first release
+
+Pre-release review of the OAuth/Connectors work in this same branch. None of these shipped to users
+(the OAuth server has never been in a released build), but each was exploitable as written.
+
+- **The OAuth server is now off until an administrator turns it on** (`includes/server/class-oauth-server.php`, `includes/admin/connection-page.php`). `WSP_MCP_OAuth_Server::init()` was hooked unconditionally on `plugins_loaded` with no setting to disable it, so simply taking the update would have published two discovery documents plus unauthenticated registration, authorize and token endpoints on every site. New option `wsp_mcp_oauth_enabled` (default `false`, constant `WSP_MCP_OAUTH_OPTION`, helper `wsp_mcp_oauth_is_enabled()`) gates routing, discovery, the `resource_metadata` pointer in the 401 challenge, **and** acceptance of already-issued OAuth tokens — so the off switch actually disconnects, rather than just refusing new grants. Toggled from MCP > Connection via nonce-protected `admin_post_wsp_mcp_toggle_oauth` (`manage_options`); switching off calls the new `WSP_MCP_OAuth_Store::revoke_everything()`.
+- **The consent screen now shows where the authorization is going** (`render_consent_page()`). It previously displayed only `client_name` — a value the client supplies to the *unauthenticated* registration endpoint, i.e. a self-assigned label with no verification behind it — and never showed the redirect target at all. An attacker could register a client named e.g. "WordPress Core Security Update" pointing at their own callback, send a logged-in editor or administrator the `/authorize` link, and a single "Allow" click would mint an access token bound to that user's account (1h access + 30-day rotating refresh, with every enabled write tool). The redirect **host** and full URI are now shown prominently, with an explicit note that the application's name is unverified.
+- **Approving a connector now requires a real capability, not just a login** (`handle_authorize()`). The only check was `is_user_logged_in()`. Six tools register with an empty capability — `require_cap()` treats that as "any authenticated user" — and `wsp_execute_get_posts()` accepts `status=all`, returning every draft, pending and scheduled post with no author filter. On any site with open registration (WooCommerce, membership, LMS), anyone who could sign up could connect Claude and read unpublished content. New `wsp_mcp_oauth_min_capability()` (default `edit_posts`, filterable via `wsp_mcp_oauth_min_capability`) is enforced before the consent screen renders and again on the consent POST.
+- **The consent and error pages can no longer be framed** (`send_frame_protection_headers()`). Both render on `init`, outside wp-admin, so WordPress's own admin framing protection never applied to them and the "Allow" button was clickjackable. Both now send `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+- **Dynamic Client Registration is throttled and bounded** (`handle_register()`, `includes/server/class-oauth-store.php`). The per-IP rate limiter existed but was called only from the token endpoint, leaving `/wsp-mcp-oauth/register` — necessarily unauthenticated under RFC 7591 — as an open, unlimited row-insert for anyone on the internet, with no cleanup path (`cleanup_expired()` never touched the clients table). `enforce_rate_limit()` now takes a bucket, max and window, and registration gets its own tight budget (5 per 10 minutes per IP) separate from the token endpoint's deliberately generous 60/60s. Added `MAX_CLIENTS` (250) as an absolute ceiling, plus `count_clients()` and `prune_unused_clients()`, which deletes registrations older than `UNUSED_CLIENT_TTL` (24h) that never produced a token — run both opportunistically at registration and on the daily `wsp_mcp_oauth_cleanup` cron, so a burst of junk cannot hold the ceiling against legitimate clients.
+- **Refresh-token replay now revokes the whole token family** (`rotate_refresh_token()`). Rotation revoked only the single presented row, so replaying a stolen-but-already-spent refresh token just returned `invalid_grant` while the successor token stayed live for whoever held it. A replay is now detected via the new `find_rotated_token()` and triggers `revoke_all_for( client_id, user_id )`, per RFC 9700 §4.14.2.
+- `uninstall.php` also removes the new `wsp_mcp_oauth_enabled` option.
+
+### Known gap
+- There is still **no admin screen listing registered OAuth clients or live tokens, and no per-connector revoke button** — the only controls are the global off switch and `revoke_everything()`. Tracked in `AGENTS.md` ("OAuth authorization server — security invariants"); should land before OAuth is promoted as the primary connection path.
+
+---
+
+## [2.7.3] — 2026-09-10
+
+### Fixed — stray output from other plugins/themes could corrupt the JSON response ("no tools available")
+
+- **A site can have any number of other plugins active, of any quality — this plugin has no
+  control over that, and never should have assumed it.** If any one of them printed a PHP
+  notice/warning/deprecation string directly to output during an ordinary WordPress hook
+  (`init`, `wp_loaded`, `rest_api_init`, a template part, …) on a request this plugin was about to
+  answer with strict JSON, that stray text landed in front of the JSON body. Every MCP client's JSON
+  parser then failed on the response — Claude showed the connector as connected, with *"This
+  connector has no tools available,"* indistinguishable from an actual bug in this plugin. The same
+  stray output could also trigger PHP's "headers already sent" warning on this plugin's own
+  `header()` calls (the 401 challenge, the OAuth discovery documents, the token endpoint, …).
+- **New file `includes/response-guard.php`**, required — and its `wsp_mcp_output_guard_start()`
+  called — before any other include in the main plugin file, so it is the earliest this plugin's own
+  bootstrap can act. `wsp_mcp_is_own_endpoint_request()` checks the raw request URI for this plugin's
+  MCP REST route or its OAuth discovery/registration/authorize/token endpoints (a handful of
+  `strpos()` calls, since this runs on every request to the site); when it matches, an output buffer
+  opens immediately. `wsp_mcp_output_guard_flush()` discards exactly that one buffer level right
+  before the real response goes out — nothing else on the site (e.g. a compression buffer opened by
+  the server) is touched — leaving clean JSON regardless of what any other active plugin printed in
+  between.
+- Wired at the two places every JSON response from this plugin passes through: `WSP_MCP_Server`'s new
+  `rest_pre_echo_response` filter (covers every JSON-RPC response and the 401 challenge, since all of
+  them are `WP_REST_Response` objects — a no-op on every REST response that isn't this plugin's own,
+  so it's safe to leave unconditional site-wide) and `WSP_MCP_OAuth_Server::send_json()` (the single
+  choke point every OAuth JSON response — discovery documents, dynamic client registration, the token
+  endpoint — already goes through).
+- **Known residual gap:** this cannot catch output printed before this plugin's own file is
+  `include`d by WordPress's plugin loader (e.g. a stray `echo` at the top level of some other
+  plugin's main file that happens to load first, alphabetically or otherwise) — there is no earlier
+  hook a regular, non-mu plugin has access to. Everything from `plugins_loaded` onward, which is
+  where real-world stray output actually happens, is covered.
+
+---
+
+## [2.7.2] — 2026-09-09
+
+### Fixed — OAuth discovery on subdirectory installs ("connector has no tools available")
+
+- **A WordPress install in a subdirectory (`https://example.com/test/`) could complete the Claude
+  Connector OAuth flow and then fail every MCP call.** Claude showed the connector as connected,
+  with *"This connector has no tools available."*
+- **Cause.** The 401 challenge advertised `resource_metadata` at the bare origin
+  (`https://example.com/.well-known/oauth-protected-resource`), and both discovery documents were
+  only served at that origin-root path. A subdirectory install never receives origin-root requests —
+  the web server routes them to the document root, not to `/test/index.php`. Claude therefore read
+  whatever else owned the document root (a static file, or a *second* WordPress install running this
+  same plugin), ran the whole authorization-code exchange against **that** server, and presented the
+  resulting token — minted from that other database — to `/test/`, which rejected it with 401 on
+  `initialize` and `tools/list`.
+- `protected_resource_metadata_url()` is now `home_url()`-relative, so the one pointer a client
+  follows verbatim (RFC 9728 §5.1) always names a URL this install can actually serve.
+- New `WSP_MCP_OAuth_Server::as_issuer()` — origin **plus** `home_url()`'s base path — is now the
+  `issuer` in the authorization-server metadata and the entry in `authorization_servers`. Two installs
+  on one domain (`/mcp` and `/test`) are now distinct authorization servers instead of both claiming
+  the bare origin. On a root install it is byte-identical to `issuer()`, so nothing changes there.
+  `issuer()` itself is unchanged and still used to rebuild an absolute URL from `REQUEST_URI` (the
+  login round-trip in `handle_authorize()`), where adding the base path would double it.
+- `maybe_dispatch()` now serves each discovery document at every spelling this install can reach:
+  the origin root (root installs), the base-path form (`/test/.well-known/…`), the RFC 9728 §3.1
+  path-inserted form derived from `rest_url()` (so a non-default REST prefix still matches), and — on
+  a subdirectory install only — `{base}/.well-known/openid-configuration`, which is the one variant
+  the MCP authorization spec's fallback chain both tries and can reach there. The origin-root
+  `openid-configuration` path is deliberately **not** claimed, so a root-level OpenID provider on the
+  same domain is left alone.
+
+**Upgrade note.** If you previously worked around this by hand-placing a static
+`.well-known/oauth-protected-resource` file in the domain's document root, delete it and reconnect —
+it will otherwise keep pointing every connector on the domain at whichever install it names.
+
+---
+
+## [2.7.1] — 2026-09-04
+
+### Security — object-level capability checks on write tools (merged from upstream `bilalnaseer/wsp-wordpress-mcp`)
+- **Fixed a broken access control issue reported by Patchstack (Ananda Dhakal): "Authenticated (Contributor+)
+  Broken Access Control", WSP MCP `<= 2.7.0`.** `wsp/update-post`, `wsp/delete-post`,
+  `wsp/update-page`, `wsp/delete-page`, `wsp/update-media`, `wsp/delete-media`, and
+  `wsp_execute_set_featured_image` previously checked only the broad primitive capability
+  (`edit_posts` / `delete_posts`) before acting, not whether the caller could act on *that specific*
+  object. A Contributor authenticating with their own Application Password could edit, publish,
+  unpublish, or trash a post/page/attachment owned by an Administrator or Editor once the
+  corresponding write tool was enabled in MCP > Settings.
+- **New file `includes/abilities/guard.php`** — shared helpers used by every affected callback:
+  `wsp_mcp_guard_edit_post( $id, $allowed_types )` / `wsp_mcp_guard_delete_post( $id, $allowed_types )`
+  load the target, verify its post type, and enforce `current_user_can( 'edit_post', $id )` /
+  `current_user_can( 'delete_post', $id )` (WordPress's own per-object meta-capability, not just the
+  primitive); `wsp_mcp_guard_post_status( $post, $status )` additionally requires the post type's
+  publish capability before accepting a `publish`, `future`, or `private` status. Mirrors the checks
+  WordPress core's own REST controllers perform.
+- `posts.php`, `pages.php`, `media.php`: `update`/`delete` (and `set_featured_image`) now resolve the
+  target through the matching guard and bail with its `WP_Error` before touching anything.
+- No existing tool, ability, or admin UI was removed or changed by this merge — additive only.
+
+## [2.11.0] — 2026-09-02
+
+### New — "Claude Connectors" tab on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **Zero-config-file connection path**, now the default first tab (`data-tab="claudeweb"`, replacing
+  the old default-active state on the classic Claude Desktop tab). Claude's own **Customize >
+  Connectors > Add custom connector** screen — a different product surface from the
+  `claude_desktop_config.json` file, shared across claude.ai, Claude Desktop, and Claude mobile —
+  accepts a bare **Remote MCP server URL** plus a **Request header** (`static_headers`, beta) instead
+  of an OAuth flow or a locally-edited JSON file. This tab surfaces exactly the two values that
+  screen needs: `#wsp-code-ccurl` (the endpoint, same `$endpoint` used everywhere else on this page)
+  and `#wsp-code-ccheader` (`Bearer <api_key>`, ready to paste as the `Authorization` header value),
+  each with its own `makeCopyBtn()`-wired Copy button. No PHP/JS logic changed elsewhere — this is
+  additive markup only, reusing existing helpers.
+- **Two hard constraints called out directly on the tab**, since neither is something this plugin
+  can fix: (1) Claude's servers connect from Anthropic's cloud infrastructure, not the user's
+  machine, so the site must be reachable on the public internet — `localhost` / private-network
+  installs cannot use this path and still need the config-file tab. (2) The Request-headers field is
+  a beta Anthropic is rolling out gradually per-organization; accounts that don't have it yet won't
+  see the field in their Add-custom-connector dialog and should use the (now second, no-longer-
+  default) **Claude Desktop (config file)** tab instead.
+- The old Claude Desktop tab is unchanged in content — only its `id`/button label and default-active
+  state moved (`wsp-tab-active` / `wsp-tab-panel-active` now live on `claudeweb`, not `claude`).
+- No server-side auth capability changed: this exposes the **existing** Bearer-API-key mechanism
+  through a different Claude UI, it does not add OAuth. See the "OAuth: Coming soon" note already on
+  the Configuration Generator (v2.9.0) for why a true zero-copy, zero-beta path would require a real
+  OAuth 2.1 authorization server implementation — out of scope here.
+- Source verified against Anthropic's own docs at time of writing: `/docs/connectors/custom/remote-
+  mcp#authenticating-with-request-headers` and `/docs/connectors/building/authentication`.
+
+---
+
+## [2.10.0] — 2026-09-02
+
+### New — One-Click Automated Connector on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **Download button on every snippet** (all six static tabs plus the live generator): each
+  `.wsp-config-header` now holds a `.wsp-config-actions` pair — **Download** next to the existing
+  **Copy**. A new client-side `downloadFile(filename, content)` helper builds a throwaway `Blob` +
+  `<a download>` and clicks it, so one click writes the exact file (`claude_desktop_config.json`,
+  `mcp.json`, `config.toml`, `mcp_config.json`, `openclaw.json`, `opencode.json`) straight to disk —
+  nothing to select, nothing to paste. The generator's download button derives its filename live
+  from the currently-rendered snippet (`snip.filename.split("/").pop()`), so it always matches
+  whichever tool/auth combination is on screen.
+- **True one-click connect for Cursor**: Cursor supports a documented deep link,
+  `cursor://anysphere.cursor-deeplink/mcp/install?name=<slug>&config=<base64-of-{url,headers}>`
+  (https://cursor.com/docs/mcp/install-links), that opens Cursor directly and lets *it* write
+  `~/.cursor/mcp.json` — no config file to open or paste into at all. A new `.wsp-connect-callout` /
+  `.wsp-connect-btn` box surfaces this both on the static **Cursor** tab (link built server-side in
+  PHP from the already-known API key) and in the live generator (link rebuilt client-side on every
+  `render()`, shown only once a real Bearer or Basic auth header is available — i.e. immediately for
+  API Key, or once both Application Password fields are filled in).
+  - Caught and fixed during implementation: WordPress's `esc_url()` strips any URL protocol that
+    isn't in its default `wp_allowed_protocols()` list, which does not include `cursor` — echoing the
+    deep link through bare `esc_url()` would have silently mangled the scheme and left the button
+    dead. Fixed by passing the protocol explicitly: `esc_url( $cursor_deeplink, array( 'cursor',
+    'https', 'http' ) )`.
+  - No equivalent deep link exists yet for Claude Desktop, Codex, Antigravity, OpenClaw, or
+    OpenCode — none of them publish a documented one-click MCP-install protocol handler, so only
+    Cursor gets the connect button; the other five keep Download + Copy.
+- Purely additive: existing Copy-button behavior, tab switching, and the Configuration Generator's
+  snippet output (v2.9.0) are unchanged.
+- `AGENTS.md` "Connection page" section documents the new element IDs, JS helpers, and the
+  `esc_url()` protocol-allowlist gotcha for future agents.
+
+---
+
+## [2.9.0] — 2026-09-01
+
+### New — Live Configuration Generator on `MCP > Connection` (`includes/admin/connection-page.php`)
+- **A new `.wsp-gen-box` section** sits above the existing six static per-client tabs: pick an **AI Tool** (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) from a `<select>`, and an **Authentication Method** from a 3-way pill group (**API Key**, **Application Password**, **OAuth**). The output snippet re-renders live, entirely client-side, on every change — no page reload, no server round trip — with its own "Copy" button reusing the page's existing `copyText()` clipboard helper.
+- **API Key** (default, marked Recommended) reuses the same Bearer-token construction as the static tabs below it.
+- **Application Password** reveals a WordPress-Username + Application-Password input pair. Neither value is ever submitted to the server: the `Authorization: Basic <base64>` token is computed in the browser with `btoa()` and embedded literally into the generated snippet, the same way the API-key path already embeds its own secret directly (no `${VAR}` env interpolation, avoiding the known mcp-remote "missing env var" failure mode). For **Claude Desktop** specifically, the generated config's `env` block also lists `WP_API_URL` / `WP_API_USERNAME` / `WP_API_PASSWORD` as a human-readable record of the credential — these three keys are informational only; the actual transport is still the `mcp-remote` bridge to this plugin's own native `wsp-mcp/v1/mcp` endpoint, **not** a reintroduction of the `@automattic/mcp-wordpress-remote` package removed in v2.2 (see `[2.2.0]` below).
+- **OAuth** is shown as a selectable method — matching what modern MCP client pickers expose — but is **not implemented server-side** (`class-auth.php` has no OAuth flow). Selecting it swaps the code preview for a "coming soon" notice and disables the copy button, rather than generating a config that would silently fail to authenticate.
+- A conditional HTTPS notice appears under the Application Password fields only when the current admin page itself is served over plain HTTP on a non-local host, since WordPress core itself refuses to let such a site create Application Passwords.
+- `readme.txt` "Key features" and changelog updated; `AGENTS.md` "Connection page" section documents the new markup/JS contract for future agents.
 
 ---
 

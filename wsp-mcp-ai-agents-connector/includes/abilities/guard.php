@@ -28,13 +28,13 @@ function wsp_mcp_guard_edit_post( $id, $allowed_types = null ) {
 	$id   = intval( $id );
 	$post = $id ? get_post( $id ) : null;
 	if ( ! $post ) {
-		return new WP_Error( 'not_found', "Object {$id} was not found." );
+		return new WP_Error( 'not_found', 'Object ' . esc_html( $id ) . ' was not found.' );
 	}
 	if ( null !== $allowed_types && ! in_array( $post->post_type, (array) $allowed_types, true ) ) {
-		return new WP_Error( 'invalid_post_type', "Object {$id} is a '{$post->post_type}', which this tool cannot modify." );
+		return new WP_Error( 'invalid_post_type', 'Object ' . esc_html( $id ) . " is a '" . esc_html( $post->post_type ) . "', which this tool cannot modify." );
 	}
 	if ( ! current_user_can( 'edit_post', $id ) ) {
-		return new WP_Error( 'forbidden', "You do not have permission to edit object {$id}." );
+		return new WP_Error( 'forbidden', 'You do not have permission to edit object ' . esc_html( $id ) . '.' );
 	}
 	return $post;
 }
@@ -50,13 +50,13 @@ function wsp_mcp_guard_delete_post( $id, $allowed_types = null ) {
 	$id   = intval( $id );
 	$post = $id ? get_post( $id ) : null;
 	if ( ! $post ) {
-		return new WP_Error( 'not_found', "Object {$id} was not found." );
+		return new WP_Error( 'not_found', 'Object ' . esc_html( $id ) . ' was not found.' );
 	}
 	if ( null !== $allowed_types && ! in_array( $post->post_type, (array) $allowed_types, true ) ) {
-		return new WP_Error( 'invalid_post_type', "Object {$id} is a '{$post->post_type}', which this tool cannot delete." );
+		return new WP_Error( 'invalid_post_type', 'Object ' . esc_html( $id ) . " is a '" . esc_html( $post->post_type ) . "', which this tool cannot delete." );
 	}
 	if ( ! current_user_can( 'delete_post', $id ) ) {
-		return new WP_Error( 'forbidden', "You do not have permission to delete object {$id}." );
+		return new WP_Error( 'forbidden', 'You do not have permission to delete object ' . esc_html( $id ) . '.' );
 	}
 	return $post;
 }
@@ -77,7 +77,7 @@ function wsp_mcp_guard_post_status( $post, $status ) {
 	}
 	$type = get_post_type_object( $post->post_type );
 	if ( ! $type || ! current_user_can( $type->cap->publish_posts ) ) {
-		return new WP_Error( 'forbidden', "You do not have permission to set status '{$status}' on object {$post->ID}." );
+		return new WP_Error( 'forbidden', 'You do not have permission to set status \'' . esc_html( $status ) . "' on object " . esc_html( $post->ID ) . '.' );
 	}
 	return true;
 }

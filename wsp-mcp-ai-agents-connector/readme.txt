@@ -27,8 +27,11 @@ https://youtu.be/1hGSUAdRxiU
 * Built-in MCP server over a single REST endpoint (Streamable HTTP, JSON-RPC 2.0) — no external dependency.
 * Per-ability on/off toggles in **MCP > Settings**; write abilities are off by default.
 * Two authentication methods: WordPress Application Passwords (HTTP Basic) or a plugin-generated API key (`Authorization: Bearer` or `X-WSP-MCP-API-Key`).
+* Live Configuration Generator on **MCP > Connection**: choose your AI tool and authentication method and get a ready-to-paste, correctly-formatted config snippet with a one-click copy button — nothing you type is sent to the server.
+* One-click automated connector on **MCP > Connection**: a **Download** button next to every snippet saves the exact config file with no copy-paste needed, and Cursor users get a **Connect Cursor Automatically** button that opens Cursor directly and adds the server for them — no config file to touch at all.
 * Capability checks on every tool — an AI client can only do what its authenticated user can do.
 * Full Audit Log in **MCP > Audit Log**: every tool call is recorded (tool name, time, user, IP, success/denied/error) in your own database — self-hosted, no external service, visible to administrators only.
+* Analytics & Performance Dashboard in **MCP > Analytics**: total requests, most-used tool, average response time, and error rate at a glance, plus a per-category usage breakdown and a recent-requests performance log — all computed from your own database.
 * Optional Yoast SEO and Elementor tools, shown only when those plugins are active.
  
 = Complete tools list =
@@ -146,8 +149,26 @@ https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
 
+= 2.7.3 =
+* Fixed: On a site with other active plugins (however many, of whatever quality), a stray PHP notice/warning printed by one of them during an ordinary WordPress hook could land in front of this plugin's JSON response and break every MCP client's JSON parser — Claude showed the connector as connected but with "no tools available," and it could also trigger a "headers already sent" warning on this plugin's own responses. A new output-buffer guard opens the instant this plugin's own MCP or OAuth endpoint is requested and discards any such stray output right before the real JSON is sent, regardless of what else is installed on the site.
+
+= 2.7.2 =
+* Fixed: OAuth discovery on subdirectory installs (e.g. `https://example.com/test/`) could leave a connected connector with "no tools available." Discovery documents are now served at every URL spelling this install can actually reach, and the two-install-on-one-domain case is disambiguated with a base-path-aware issuer identity.
+
 = 2.7.1 =
-* Security: Fixed a broken access control issue (reported by Patchstack) where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. This mirrors the checks WordPress core's own REST endpoints perform.
+* Security: Fixed a broken access control issue reported by Patchstack (Ananda Dhakal) as "Authenticated (Contributor+) Broken Access Control", affecting WSP MCP <= 2.7.0, where the Update Post, Delete Post, Update Page, Delete Page, Update Media, Delete Media and Set Featured Image tools only checked a broad primitive capability (`edit_posts` / `delete_posts`) and not object-level permission. A Contributor authenticating with their own Application Password could edit, publish, unpublish or trash a post, page or attachment owned by an Administrator or Editor once the write tool was enabled. All of these callbacks now load the target object and enforce `current_user_can( 'edit_post', $id )` / `current_user_can( 'delete_post', $id )`, restrict each tool to its expected post type, and require the post type's publish capability before accepting a `publish`, `future` or `private` status. New shared helper file `includes/abilities/guard.php`. Merged from the upstream project.
+
+= 2.11.0 =
+* New: "Claude Connectors" tab on **MCP > Connection** — the default, first tab now. Instead of editing `claude_desktop_config.json`, paste the server URL directly into Claude's own Customize > Connectors > Add custom connector screen (claude.ai, Claude Desktop, and Claude mobile all share it), set Authentication to None, and add one Request header (`Authorization`) with the value shown. No config file, no JSON, nothing to merge. Requires the site to be reachable on the public internet (Claude's servers cannot reach localhost), and Claude's "Request headers" field is currently a beta rolling out gradually — the old config-file method is kept as its own tab for accounts that don't have it yet.
+
+= 2.10.0 =
+* New: One-click automated connector on **MCP > Connection**. A **Download** button now sits beside **Copy** on every snippet (all six client tabs plus the live generator) — it saves the exact config file directly, no copy-paste required. Cursor users additionally get a **Connect Cursor Automatically** button using Cursor's official one-click MCP install link, which opens Cursor and adds the server for you with no config file to open or edit at all.
+
+= 2.9.0 =
+* New: Configuration Generator on **MCP > Connection** — pick an AI tool (Claude Desktop, Cursor, Codex, Antigravity, OpenClaw, OpenCode) and an authentication method (API Key or Application Password), and the correct config snippet is built live in your browser, with a one-click copy button. Application Password mode never sends your credentials to the server — the header is computed client-side. OAuth is shown as a selectable method with a "Coming soon" state since it is not yet implemented server-side.
+
+= 2.8.0 =
+* New: Analytics & Performance Dashboard in **MCP > Analytics** — summary cards for total requests, most-used tool, average response time, and error rate; a per-category tool-usage breakdown with lightweight CSS progress bars; and a recent-requests performance log. Built entirely on the existing Audit Log database (`wp_wsp_mcp_audit_log`), which now also records each request's ability category and execution duration in milliseconds — no external service involved. Restricted to administrators (`manage_options`).
 
 = 2.7.0 =
 * New: Full Audit Log. Every MCP `tools/call` request is now recorded in a dedicated, self-hosted database table (`wp_wsp_mcp_audit_log`) — tool name, timestamp, acting user, request IP, and outcome (success, denied, or error). No external API or paid service is involved.
