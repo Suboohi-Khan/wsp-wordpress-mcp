@@ -296,22 +296,38 @@ class WSP_MCP_Audit_Log {
 	 */
 	public static function get_category_breakdown( $days = 30, $limit = 12 ) {
 		global $wpdb;
-		$table  = self::table();
-		$days   = (int) $days;
-		$limit  = max( 1, min( 50, (int) $limit ) );
-		$where  = '1=1';
-		$values = array();
-		if ( $days > 0 ) {
-			$where    = 'created_at >= %s';
-			$values[] = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
-		}
-		$values[] = $limit;
+		$table = self::table();
+		$days  = (int) $days;
+		$limit = max( 1, min( 50, (int) $limit ) );
 
-		$sql = "SELECT IF(category = '', 'Uncategorized', category) AS category, COUNT(*) AS n, AVG(duration_ms) AS avg_ms
-			FROM {$table} WHERE {$where} GROUP BY category ORDER BY n DESC LIMIT %d";
-		// Table name is built from $wpdb->prefix (no user input); all values are bound via prepare().
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
-		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $values ), ARRAY_A );
+		// The query is written out in full at each call site rather than built
+		// into a variable first: $wpdb->prepare() can only be verified — by a
+		// reviewer or by PHPCS — when the query it receives is a literal, so
+		// passing a pre-assembled $sql string trips
+		// WordPress.DB.PreparedSQL.NotPrepared even when every value is bound.
+		// The windowed and all-time forms are therefore separate statements,
+		// the same way get_analytics_overview() above handles the same split.
+		// Table name is built from $wpdb->prefix (no user input); every value
+		// is bound via prepare().
+		if ( $days > 0 ) {
+			$since = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from $wpdb->prefix; values bound below.
+				"SELECT IF(category = '', 'Uncategorized', category) AS category, COUNT(*) AS n, AVG(duration_ms) AS avg_ms
+				 FROM {$table} WHERE created_at >= %s GROUP BY category ORDER BY n DESC LIMIT %d",
+				$since,
+				$limit
+			), ARRAY_A );
+		} else {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from $wpdb->prefix; value bound below.
+				"SELECT IF(category = '', 'Uncategorized', category) AS category, COUNT(*) AS n, AVG(duration_ms) AS avg_ms
+				 FROM {$table} GROUP BY category ORDER BY n DESC LIMIT %d",
+				$limit
+			), ARRAY_A );
+		}
 		$rows = is_array( $rows ) ? $rows : array();
 
 		$total = 0;
