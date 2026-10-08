@@ -11,7 +11,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased] — targets 2.9.5
+## [2.9.5] — 2026-10-08
 
 ### Fixed — shipping zone `locations` were never saved
 
