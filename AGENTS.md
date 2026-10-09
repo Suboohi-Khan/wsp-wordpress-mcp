@@ -219,7 +219,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — docs
         │   └── about-page.php       ← static WebSensePro info (MCP > About Us, after Analytics)
         └── abilities/           ← wsp_execute_* logic (called by the native server)
             ├── posts.php  pages.php  taxonomy.php  comments.php  media.php
-            ├── users.php  search.php  site.php  menus.php  site-editor.php  widgets.php  health.php  themes.php  theme-upload.php
+            ├── users.php  search.php  site.php  menus.php  site-editor.php  widgets.php  health.php  revisions.php  post-meta.php  blocks.php  redirects.php  themes.php  theme-upload.php
             ├── yoast.php  elementor.php
             ├── woocommerce.php  acf.php
 ```
@@ -241,8 +241,9 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — docs
 `wsp_mcp_first_success` (timestamp of the first successful tool call — gates the review notice),
 user meta `wsp_mcp_review_notice` (`'dismissed'` or a snooze-until timestamp), DB tables
 `{prefix}wsp_mcp_sessions`, `{prefix}wsp_mcp_audit_log`, `{prefix}wsp_mcp_oauth_clients`,
-`{prefix}wsp_mcp_oauth_codes`, `{prefix}wsp_mcp_oauth_tokens`, cron events
-`wsp_mcp_session_cleanup`, `wsp_mcp_audit_log_cleanup`, `wsp_mcp_oauth_cleanup`.
+`{prefix}wsp_mcp_oauth_codes`, `{prefix}wsp_mcp_oauth_tokens`, `{prefix}wsp_mcp_redirects`, `{prefix}wsp_mcp_404_log` (+ options
+`wsp_mcp_redirects_db_version`, `wsp_mcp_redirects_count`), cron events
+`wsp_mcp_session_cleanup`, `wsp_mcp_audit_log_cleanup`, `wsp_mcp_oauth_cleanup`, `wsp_mcp_404_cleanup`.
 All of the above are removed in `uninstall.php`.
 
 ---
@@ -511,6 +512,71 @@ All OFF by default. Settings-page group **Site Health & Cron**, icon 🩺. Cron 
 - **`run-cron-event`** runs only an **already-scheduled** event: `do_action_ref_array( $hook, $args )` in the MCP request, same as wp-cron.php. One-off events are unscheduled first (as wp-cron.php does); recurring ones keep their next run. Output is captured by unwinding every buffer above the starting `ob_get_level()` (so a callback that leaves a buffer open can't leak into the JSON response), then plain-texted, redacted, capped at 2000 chars. Refused when no callback is attached. A callback that calls `exit`/`die` will still kill the request — unavoidable.
 - **Invariants (do not regress):** (1) **No schedule-new-event tool** — an arbitrary hook + args is a primitive for firing any action. (2) **`delete-cron-event` refuses `wsp_mcp_*` hooks** — they're only re-added in `wsp_mcp_activate` / `wsp_mcp_maybe_upgrade_db`, so removing one silently stops session / audit-log / OAuth cleanup until the next version bump. (3) **Error log reads only** the `error_log` ini path (if a readable file, not `syslog`) or `WP_CONTENT_DIR/debug.log` — never a caller-supplied path. Last ≤2 MB scanned, lines capped at 2000 chars, response capped at 64 KB (oldest dropped, `truncated: true`), path shown relative to `ABSPATH` or as basename only.
 - **Redaction** (`wsp_health_redact()` / `_deep()`): applied to cron args, run output, error-log lines and Site Health Info values — `define()`d keys/salts/secrets, Bearer/Basic tokens, `user:pass@` URL credentials, JWTs, `password=` / `token:` / `api_key=`-style pairs, and opaque tokens ≥40 chars. Error-log `grep` matches *after* redaction, so it can't be used to probe redacted secrets.
+
+#### Revisions (`revisions.php`) — unreleased
+
+Works on any post type with `revisions` support (posts, pages, CPTs). All OFF by default; settings group **Revisions** (🕘). Tool capability is `edit_posts`; the real gate is the **parent post's** `edit_post` (via `wsp_mcp_guard_edit_post()`), matching core's revisions REST controller.
+
+| Ability key | Label | Access | Inputs |
+|---|---|---|---|
+| `wsp/get-revisions` | List Revisions | read | `post_id`*, `limit` (1–100, default 20) |
+| `wsp/get-revision` | Read Revision | read | `id`* (revision ID) — full title/content/excerpt plus a `current` block of the live post |
+| `wsp/restore-revision` | Restore Revision | write | `id`* |
+
+- Each list row carries `changed_fields` (which of title/content/excerpt differ from the live post) and `is_autosave`.
+- Restore uses `wp_restore_post_revision()`: restores title, content, excerpt only (not status, slug, taxonomies, meta unless registered for revisions). `wp_update_post()` snapshots the live version as a new revision first, so a restore is undoable. All errors are `WP_Error`.
+
+#### Post Meta (`post-meta.php`) — unreleased
+
+Any post type except `revision`. All OFF by default; settings group **Post Meta** (🏷️). Tool capability `edit_posts`; real gates are `wsp_mcp_guard_edit_post()` (object) plus core's meta caps `edit_post_meta` / `delete_post_meta` (per key).
+
+| Ability key | Label | Access | Inputs |
+|---|---|---|---|
+| `wsp/get-post-meta` | Read Post Meta | read | `post_id`*, `key` (omit = all public meta, max 200), `single` (default true) |
+| `wsp/update-post-meta` | Update Post Meta | write | `post_id`*, `key`*, `value`* (any JSON type), `prev_value` |
+| `wsp/delete-post-meta` | Delete Post Meta | write | `post_id`*, `key`*, `value` |
+
+- **Protected keys (leading underscore, `is_protected_meta()`) are refused for read, update and delete** and hidden from the all-meta listing — keeps `_elementor_data` (code-bearing, see Elementor write guards), `_thumbnail_id`, `_wp_*`, and other plugins' secrets out of reach. Don't add a bypass; use dedicated tools (Yoast, Elementor, ACF).
+- Keys validated `^[A-Za-z0-9_\-:.]{1,255}$`. Values sanitized recursively with `wp_kses_post()` (`wsp_post_meta_sanitize_value()`), then `wp_slash()`ed because `update_post_meta()` unslashes (so no `wp_unslash()` on input — same reasoning as block markup).
+- `update_post_meta()` returns false for both failure and "unchanged"; the callback tells them apart and reports `changed: false`. Delete returns the `previous_value`; post meta has no trash.
+
+#### Blocks / Gutenberg (`blocks.php`) — unreleased
+
+Nine tools, all OFF by default; settings group **Blocks** (🧩). "Blocks" = reusable blocks (`wp_block` posts). Patterns and block types are read-only registry views.
+
+| Ability key | Label | Access | Capability | Inputs |
+|---|---|---|---|---|
+| `wsp/list-blocks` | List Reusable Blocks | read | `edit_posts` | `search`, `status`, `per_page`, `page` |
+| `wsp/get-block` | Read Reusable Block | read | `edit_posts` | `id`*, `parse` |
+| `wsp/create-block` | Create Reusable Block | write | `publish_posts` | `title`*, `content`*, `status`, `slug`, `sync_status` |
+| `wsp/update-block` | Update Reusable Block | write | `edit_posts` | `id`*, `title`, `content`, `status`, `sync_status` |
+| `wsp/delete-block` | Delete Reusable Block | write | `delete_posts` | `id`*, `force` (default trash) |
+| `wsp/list-patterns` | List Block Patterns | read | `edit_posts` | `search`, `category`, `include_content`, `limit` |
+| `wsp/get-post-blocks` | Read Post Blocks | read | `edit_posts` | `post_id`* |
+| `wsp/update-post-blocks` | Update Post Blocks | write | `edit_posts` | `post_id`*, exactly one of `blocks[]` \| `content` |
+| `wsp/list-block-types` | List Block Types | read | `edit_posts` | `search`, `namespace`, `include_attributes`, `limit` |
+
+- Update/delete use `wsp_mcp_guard_edit_post/delete_post( $id, 'wp_block' )`; create checks the type's `cap->create_posts` / `cap->publish_posts`; status changes go through `wsp_mcp_guard_post_status()`. Post-level tools use `wsp_mcp_guard_edit_post()` and refuse revision/attachment/nav_menu_item.
+- Sync mode = meta `wp_pattern_sync_status`: `unsynced` stored, `synced` = meta deleted (matches the editor).
+- **`update-post-blocks`:** `wsp_blocks_normalize()` validates the tree (registered block names only, `^[a-z0-9-]+/[a-z0-9-]+$`, max 2000 nodes / 20 deep, `innerContent` must hold one `null` per inner block), strings in `attrs` are kses'd, then `serialize_blocks()` and a final `wp_kses_post()` over the markup. `wp_slash()` before `wp_update_post()`, no `wp_unslash()` (block-markup rule). Replaces ALL content; WP stores the old version as a revision.
+- `delete-block` and `get-block` report `used_in` (posts embedding `{"ref":ID}`, caller-editable only, max 50).
+
+#### Redirects & 404 Manager (`redirects.php` + `includes/seo/class-redirects.php`) — unreleased
+
+Five tools, all OFF by default, all `manage_options`; settings group **Redirects & 404** (↪️). Logic = callbacks in `abilities/redirects.php`; storage + front-end runtime = class `WSP_MCP_Redirects`.
+
+| Ability key | Label | Access | Inputs |
+|---|---|---|---|
+| `wsp/list-redirects` | List Redirects | read | `search`, `per_page`, `page` |
+| `wsp/create-redirect` | Create Redirect | write | `source`*, `destination`*, `status_code` (301\|302, default 301), `allow_external`, `note` |
+| `wsp/delete-redirect` | Delete Redirect | write | `id`* |
+| `wsp/get-404-logs` | Read 404 Log | read | `limit`, `orderby` (recent\|hits), `search`, `min_hits`, `days`, `unresolved_only` |
+| `wsp/clear-404-logs` | Clear 404 Log | write | `id` \| `all` |
+
+- **Tables:** `{prefix}wsp_mcp_redirects` (unique `source_hash`) and `{prefix}wsp_mcp_404_log` (one aggregated row per path, unique `path_hash`, upserted with `ON DUPLICATE KEY`). Option `wsp_mcp_redirects_db_version` is the class's **own** schema gate (`WSP_MCP_Redirects::init()` on `plugins_loaded` → `install()`), independent of `wsp_mcp_db_version`, because the plugin version was not bumped when this shipped. Autoloaded option `wsp_mcp_redirects_count` lets requests skip the lookup query when no redirects exist. Cron `wsp_mcp_404_cleanup` (daily; retention filter `wsp_mcp_404_log_retention_days`, default 30). All removed in `uninstall.php`.
+- **Runtime (`template_redirect`):** priority 1 `handle_redirect()` — exact path match (case-insensitive, trailing slash and home sub-directory ignored, query string ignored, GET/HEAD only), one indexed query, hit counter update, `wp_redirect()` + `exit`. Priority 999 `log_404()` — only when `is_404()` **and** `wsp/get-404-logs` is enabled (admin opt-in; turning the ability off stops recording). Redirects keep working when their tools are toggled off — they are site configuration.
+- **Invariants (do not regress):** (1) destinations are `/path` or http(s) URLs; **other domains need `allow_external=true`** (open-redirect/phishing primitive), `//host`, backslashes, credentials refused — this is why plain `wp_redirect()` is acceptable at runtime; (2) sources under `/wp-admin`, `/wp-login.php`, `/wp-json`, `/wp-cron.php`, `/xmlrpc.php` and `/` are refused (a redirect on `/wp-json` would sever the MCP endpoint); (3) loops (direct or via ≤10 hops) refused on create, plus a runtime self-redirect guard; (4) **404 log stores no IPs, strips query strings from path and referrer**, is capped at 1000 rows (random-1/20 prune on insert + daily cron); (5) caps: 1000 redirects, 500-char paths.
+- No update/toggle-redirect tool (delete + create). No regex/wildcard matching.
 
 #### Theme upload (`theme-upload.php`) — added v2.9.4
 

@@ -11,6 +11,53 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added — Revisions ability group (`includes/abilities/revisions.php` — new file)
+
+- `wsp_get_revisions`, `wsp_get_revision`, `wsp_restore_revision`: list a post's revisions, read one next
+  to the live version, and roll back to it. Built on `wp_get_post_revisions()` / `wp_get_post_revision()` /
+  `wp_restore_post_revision()`. OFF by default; new settings group **Revisions**.
+- Access is gated by the parent post's `edit_post` capability (object-level guard), not just `edit_posts`.
+  Restore keeps the previous live version as a new revision, so it is reversible.
+
+---
+
+### Added — Redirects & 404 Manager (`includes/seo/class-redirects.php`, `includes/abilities/redirects.php` — new files)
+
+- Tools `wsp_list_redirects`, `wsp_create_redirect`, `wsp_delete_redirect` (301/302), `wsp_get_404_logs`,
+  `wsp_clear_404_logs`. OFF by default; new settings group **Redirects & 404**; all `manage_options`.
+- First module with a front-end runtime: `template_redirect` applies stored redirects (exact path match) and,
+  only while `wsp/get-404-logs` is enabled, records 404s (aggregated per path, no IPs, query strings stripped,
+  capped, 30-day retention via daily cron `wsp_mcp_404_cleanup`).
+- New tables `wsp_mcp_redirects` and `wsp_mcp_404_log` with their own schema-version gate; removed in `uninstall.php`.
+- Safety: external destinations need `allow_external=true`; `/`, `/wp-admin`, `/wp-login.php`, `/wp-json`,
+  `/wp-cron.php`, `/xmlrpc.php` can't be sources; redirect loops refused.
+
+### Fixed — GMT timestamps mislabeled in Revisions and Blocks output
+
+- `wsp_get_revisions` / `wsp_get_revision` / Blocks `modified` formatted `post_modified_gmt` through
+  `mysql2date()`, which stamps the clock time with the *site* timezone offset. Now formatted as true UTC ISO 8601.
+
+### Added — Blocks (Gutenberg) ability group (`includes/abilities/blocks.php` — new file)
+
+- Nine tools: `wsp_list_blocks`, `wsp_get_block`, `wsp_create_block`, `wsp_update_block`, `wsp_delete_block`
+  (reusable `wp_block` posts), `wsp_list_patterns`, `wsp_list_block_types` (registry views), and
+  `wsp_get_post_blocks` / `wsp_update_post_blocks` (per-post block tree via `parse_blocks()` /
+  `serialize_blocks()`). OFF by default; new settings group **Blocks**. Named `wsp_*` per project convention.
+- Object-level guards on every write; block trees validated against registered block types with node/depth
+  limits; all markup passes `wp_kses_post()`. Delete trashes by default and reports posts still using the block.
+
+### Added — Post Meta ability group (`includes/abilities/post-meta.php` — new file)
+
+- `wsp_get_post_meta`, `wsp_update_post_meta`, `wsp_delete_post_meta` over `get_/update_/delete_post_meta()`.
+  OFF by default; new settings group **Post Meta**.
+- Security: object guard + per-key `edit_post_meta` / `delete_post_meta` caps; protected (underscore) keys are
+  refused and hidden, so Elementor data and other plugins' internals can't be read or rewritten; written
+  strings go through `wp_kses_post()`.
+
+---
+
 ## [2.9.4] — 2026-10-06
 
 ### Changed — version bump and tool count
