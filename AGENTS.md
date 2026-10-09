@@ -100,6 +100,8 @@ where real-world stray output actually happens, is covered.
   (`wsp_mcp_oauth_clients` / `_codes` / `_tokens`), daily cron `wsp_mcp_oauth_cleanup`. **Read the
   invariants below before touching either file.**
 
+**Server instructions & resources (unreleased):** `initialize` may carry an `instructions` string and `capabilities.resources`, and `resources/list|read` serve real documents — all driven by the admin's Site Context feature, see **"### Site Context"** below. A tool spec may use `active_callback` (fn(): bool) instead of `enable_key`.
+
 **Tools (`includes/tools/native-tools.php`):** `wsp_mcp_register_native_tools()` registers every
 tool with `WSP_MCP_Server::register_tool($name, $spec)`. It **reuses the existing
 `wsp_execute_*()` callbacks verbatim** (in `includes/abilities/*.php`) — only the transport
@@ -204,6 +206,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — docs
         │                          before any other include
         ├── dependency.php      ← stub: wsp_mcp_transport_available() (always true) — kept for back-compat
         ├── registry.php        ← central ability registry + settings helpers
+        ├── context.php         ← Site Context (unreleased): admin-written AGENTS.md/CHANGELOG.md storage + delivery to agents
         ├── server/             ← v2.0 native MCP server
         │   ├── class-mcp-server.php     ← transport + JSON-RPC dispatch + tool registry
         │   ├── class-session-store.php  ← DB-backed sessions
@@ -215,6 +218,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — docs
         │   ├── promo-cards.php      ← shared sidebar cards + UTM link builder (both admin pages)
         │   ├── plugin-links.php     ← Settings | Connection | About Us links under the name on the Plugins screen
         │   ├── review-notice.php    ← WP.org review request on the Plugins screen + MCP pages, after first successful tool call
+        │   ├── context-page.php     ← MCP > Context: Site Context switch + AGENTS.md / CHANGELOG.md editors
         │   ├── settings-page.php    ← toggle UI (MCP > Settings) — accordion groups + legacy-page redirect
         │   ├── connection-page.php  ← native endpoint + API key + per-client tabs (MCP > Connection)
         │   └── about-page.php       ← static WebSensePro info (MCP > About Us, after Analytics)
@@ -238,7 +242,9 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — docs
 | `WSP_MCP_DIR` | `plugin_dir_path(__FILE__)` |
 
 **Other persistent state:** option `wsp_mcp_api_key` (native API key), option `wsp_mcp_db_version`
-(migration gate), option `wsp_mcp_oauth_enabled` (OAuth opt-in, **default off**), option
+(migration gate), option `wsp_mcp_oauth_enabled` (OAuth opt-in, **default off**), options
+`wsp_mcp_context_enabled` (Site Context switch, **default off**), `wsp_mcp_context_agents` /
+`wsp_mcp_context_changelog` (the two Markdown documents, non-autoloaded), option
 `wsp_mcp_first_success` (timestamp of the first successful tool call — gates the review notice),
 user meta `wsp_mcp_review_notice` (`'dismissed'` or a snooze-until timestamp), DB tables
 `{prefix}wsp_mcp_sessions`, `{prefix}wsp_mcp_audit_log`, `{prefix}wsp_mcp_oauth_clients`,
@@ -905,6 +911,36 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
       the same pattern (verify the exact scheme/param shape against that vendor's docs before
       shipping — see the Cursor link above for the level of confirmation expected).
 
+### Site Context — `context.php` + `admin/context-page.php` (unreleased)
+
+- **Purpose:** the admin writes `AGENTS.md` and `CHANGELOG.md` for *their site* (not this repo's docs) on
+  **MCP > Context**; a connected agent gets them first, so it doesn't crawl the site to learn its structure
+  (saves tokens/time). Menu slug `wsp-mcp-context`, `admin_menu` priority 22 (after Connection), `manage_options`.
+- **Master switch:** option `wsp_mcp_context_enabled`, **default off**, toggled by the switch at the top of the page
+  and saved together with both documents by `admin_post_wsp_mcp_save_context` (nonce + `manage_options`).
+  `wsp_mcp_context_is_active()` = switch on **and** at least one document non-empty; that — not the bare switch —
+  gates everything below, so an empty page advertises nothing.
+- **Delivery (three channels, all from `context.php`):**
+  1. `initialize` result `instructions` (`wsp_mcp_context_instructions()`): preamble + first
+     `WSP_MCP_CONTEXT_AGENTS_PUSH_CHARS` (6000) of AGENTS.md + first `WSP_MCP_CONTEXT_CHANGELOG_PUSH_CHARS` (1500)
+     of the changelog (so keep **newest entries first**). Ends with a truncated/complete pointer to the tool. Also
+     adds `capabilities.resources`. Absent when inactive.
+  2. Tool `wsp_get_site_context` (`file`: all|agents|changelog, full uncapped text). Registered in `native-tools.php`
+     with the new tool-spec key **`active_callback`** (`wsp_mcp_context_is_active`) instead of an `enable_key` — it is
+     not in `wsp_mcp_ability_registry()` and has no Settings-page toggle, because the Context switch is its only gate.
+     `WSP_MCP_Server::enabled_tools()` honours `active_callback` before `enable_key`.
+  3. Resources `wsp://context/agents.md` / `wsp://context/changelog.md` (`resources/list`, `resources/read`; unknown
+     URI → JSON-RPC error `-32002`).
+- **Sanitization:** documents are admin-authored plain text, never rendered as HTML (admin textarea uses
+  `esc_textarea()`, MCP output is JSON), so `wsp_mcp_context_sanitize()` normalises UTF-8/newlines, drops control
+  characters and caps at `WSP_MCP_CONTEXT_MAX_CHARS` (50,000) — it deliberately does **not** strip tags, since Markdown
+  contains `<placeholders>`/inline HTML. Don't "fix" this with `wp_kses_post()`; it would corrupt the documents.
+- **Trust/leak note (do not regress):** the tool has capability `''` and `instructions` go to every authenticated
+  client, including low-privilege Application Password users — the page tells admins never to put secrets in these
+  documents. Don't add anything dynamic (user data, options, keys) to the pushed text.
+- Clients cache `initialize`, so edits reach agents only after they reconnect (same gotcha as tool lists).
+- Cleanup: all three options removed in `uninstall.php`.
+
 ### Review notice — `review-notice.php` (v2.9.2)
 
 - Asks admins for a WordPress.org review: "Is WSP MCP working for you? A review helps other people
@@ -915,8 +951,8 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
   checks the audit log for any past `success` row (so sites that used the plugin before this notice
   existed qualify immediately) and records the option if found. One-way only — once the option is set
   the log is never consulted again, so clearing/pruning the log can't make the notice reappear or vanish.
-- Rendered on `admin_notices`, **only** on the Plugins screen and this plugin's four MCP pages
-  (`page=` `wsp-mcp-abilities` / `wsp-mcp-connection` / `wsp-mcp-audit-log` / `wsp-mcp-analytics`),
+- Rendered on `admin_notices`, **only** on the Plugins screen and this plugin's five MCP pages
+  (`page=` `wsp-mcp-abilities` / `wsp-mcp-connection` / `wsp-mcp-context` / `wsp-mcp-audit-log` / `wsp-mcp-analytics`),
   checked by `wsp_mcp_review_is_allowed_screen()`; only for `manage_options`. MCP pages are matched on
   the `page` query arg, not the screen ID, because submenu screen IDs derive from the translatable
   menu title. **Do not add the Dashboard or make it site-wide** — that's the nag pattern WP.org
@@ -932,7 +968,7 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
 ### Plugins-screen links — `plugin-links.php`
 
 - `wsp_mcp_plugin_action_links()` on `plugin_action_links_<basename>` prepends **Settings | Connection |
-  About Us** before core's Deactivate link. Shown only to `manage_options` users (the pages need it).
+  Context | About Us** before core's Deactivate link. Shown only to `manage_options` users (the pages need it).
 
 ### About Us page (`MCP > About Us`) — `about-page.php`
 

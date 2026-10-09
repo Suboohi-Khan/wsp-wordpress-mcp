@@ -24,6 +24,7 @@ function wsp_mcp_plugin_action_links( $links ) {
 	$pages = array(
 		'wsp-mcp-abilities'  => __( 'Settings', 'wsp-mcp-ai-agents-connector' ),
 		'wsp-mcp-connection' => __( 'Connection', 'wsp-mcp-ai-agents-connector' ),
+		'wsp-mcp-context'    => __( 'Context', 'wsp-mcp-ai-agents-connector' ),
 		'wsp-mcp-about'      => __( 'About Us', 'wsp-mcp-ai-agents-connector' ),
 	);
 

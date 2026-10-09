@@ -53,6 +53,10 @@ class WSP_MCP_Server {
 	 *     @type callable $callback    fn(array $args): array|WP_Error.
 	 *     @type string   $capability  Required capability ('' = authenticated only).
 	 *     @type string   $enable_key  Registry key for the admin on/off toggle.
+	 *     @type callable $active_callback Optional fn(): bool — when set, the tool is
+	 *                                 advertised/callable only while it returns true
+	 *                                 (used by tools driven by a non-registry switch,
+	 *                                 e.g. the Site Context feature).
 	 * }
 	 */
 	public static function register_tool( $name, array $spec ) {
@@ -62,6 +66,7 @@ class WSP_MCP_Server {
 			'callback'    => null,
 			'capability'  => '',
 			'enable_key'  => '',
+			'active_callback' => null,
 		) );
 	}
 
@@ -78,6 +83,12 @@ class WSP_MCP_Server {
 	private static function enabled_tools() {
 		$enabled = array();
 		foreach ( self::$tools as $name => $spec ) {
+			if ( is_callable( $spec['active_callback'] ) ) {
+				if ( call_user_func( $spec['active_callback'] ) ) {
+					$enabled[ $name ] = $spec;
+				}
+				continue;
+			}
 			if ( '' === $spec['enable_key'] || wsp_mcp_is_enabled( $spec['enable_key'] ) ) {
 				$enabled[ $name ] = $spec;
 			}
@@ -157,7 +168,13 @@ class WSP_MCP_Server {
 			case 'ping':
 				return self::rpc_result( $id, new stdClass() );
 			case 'resources/list':
-				return self::rpc_result( $id, array( 'resources' => array() ) );
+				return self::rpc_result( $id, array( 'resources' => wsp_mcp_context_resources() ) );
+			case 'resources/read':
+				$content = wsp_mcp_context_read_resource( isset( $params['uri'] ) && is_string( $params['uri'] ) ? $params['uri'] : '' );
+				if ( null === $content ) {
+					return self::rpc_error( $id, -32002, 'Resource not found.', 200 );
+				}
+				return self::rpc_result( $id, array( 'contents' => array( $content ) ) );
 			case 'prompts/list':
 				return self::rpc_result( $id, array( 'prompts' => array() ) );
 			default:
@@ -184,6 +201,14 @@ class WSP_MCP_Server {
 				'tools' => new stdClass(),
 			),
 		);
+
+		// Site Context (MCP > Context): hand the agent the admin's AGENTS.md /
+		// CHANGELOG.md up front. Absent entirely unless the admin enabled it.
+		$instructions = wsp_mcp_context_instructions();
+		if ( '' !== $instructions ) {
+			$result['instructions']             = $instructions;
+			$result['capabilities']['resources'] = new stdClass();
+		}
 
 		$response = self::rpc_result( $id, $result );
 		$response->header( 'Mcp-Session-Id', $session_id );

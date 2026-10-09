@@ -11,6 +11,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added — Site Context: admin-written AGENTS.md + CHANGELOG.md delivered to agents first (`includes/context.php`, `includes/admin/context-page.php` — new files)
+
+- New **MCP > Context** page with an on/off switch (**off by default**) and two Markdown editors, AGENTS.md ("how this site works, rules for agents") and CHANGELOG.md ("what changed and why", newest first). Each editor shows a character/token estimate and can load text from a local `.md` file (client-side `FileReader`; nothing uploaded). Also linked from the Plugins-screen action links.
+- **Why:** a coding agent connecting to a site had to spend many tool calls (and tokens) discovering its structure. With Site Context on, the agent is handed that knowledge up front.
+- **How it's delivered:** (1) `initialize` returns `instructions` — the first 6,000 chars of AGENTS.md and the first 1,500 chars of the changelog, with a pointer to (2) new tool `wsp_get_site_context` (`file`: all|agents|changelog) returning the full text, and (3) MCP resources `wsp://context/agents.md` / `wsp://context/changelog.md` (`resources/list` / `resources/read`; previously `resources/list` was always empty). Nothing is advertised unless the switch is on **and** a document has content. Clients cache `initialize`, so agents must reconnect to see edits.
+- **Server:** tool specs gained an optional `active_callback` (used instead of `enable_key` so the tool has no Settings-page toggle of its own). Documents are stored plain (options `wsp_mcp_context_enabled|agents|changelog`, non-autoloaded), normalised + capped at 50,000 chars, never rendered as HTML; saving needs a nonce and `manage_options`. Options removed on uninstall.
+- **Security note:** the tool and `instructions` reach every authenticated client (including low-privilege Application Passwords), so the page warns admins not to store secrets in these documents.
+
+---
+
 ## [2.9.5] — 2026-10-08
 
 ### Fixed — shipping zone `locations` were never saved
