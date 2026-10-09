@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, chatgpt, ai agent
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.9.4
+Stable tag: 2.9.5
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -120,6 +120,12 @@ Watch the step-by-step video tutorial:
 https://youtu.be/hxhjs3IUYQE
 
 == Changelog ==
+
+= 2.9.5 =
+* New: WooCommerce store management — 34 tools. Delete products, variations, coupons, categories and tags (products, variations and coupons go to the trash unless you ask for permanent deletion). Manage product categories, tags, global attributes and attribute terms. Read and update WooCommerce settings, tax classes and rates, shipping zones and methods, and payment gateways. Create and update products can now set categories, tags and attributes. Passwords, keys and tokens are always masked and never written back.
+* New: Plugin management — Install Plugin from WordPress.org (`wsp_install_plugin`), Install Plugin From URL (`wsp_install_plugin_from_url`, https .zip only), Delete Plugin (`wsp_delete_plugin`, must be deactivated first) and Update Plugin (`wsp_update_plugin`). They use WordPress's own installer and require the `install_plugins`, `delete_plugins` and `update_plugins` capabilities (administrators; respects DISALLOW_FILE_MODS).
+* Improved: Read Plugins (`wsp_get_plugins`) now lists every installed plugin with its active state and available update. Create Category (`wsp_create_category`) can also create WooCommerce product categories.
+* All new tools are OFF by default.
 
 = 2.9.4 =
 * New: Site Editor ability group for block (Full Site Editing) themes — six tools. Read Global Styles (`wsp_get_global_styles`) returns the site's theme.json customizations or the merged effective values, and can list the theme's style variations. Update Global Styles (`wsp_update_global_styles`) deep-merges new colors, typography, spacing and block styles, or applies a style variation. List / Read / Create / Update Template (`wsp_get_templates`, `wsp_get_template`, `wsp_create_template`, `wsp_update_template`) manage block templates and template parts (header, footer, …). All require `edit_theme_options` and are OFF by default. Custom CSS cannot be set through these tools, and template content is filtered with `wp_kses_post()`.
@@ -251,6 +257,9 @@ https://youtu.be/hxhjs3IUYQE
 * Elementor abilities, modular architecture, auto config generator.
 
 == Upgrade Notice ==
+
+= 2.9.5 =
+Adds 34 WooCommerce store-management tools (delete, categories, tags, attributes, settings, tax, shipping, payment gateways) and 4 plugin-management tools (install, install from URL, delete, update). All new tools are OFF by default — enable them from MCP > Settings if you want them.
 
 = 2.9.4 =
 Adds a Site Editor tool group (Global Styles + block templates, 6 tools) for block themes , a Widgets & Sidebars tool group (8 tools) for classic themes, a Site Health, Cron & Error Log tool group (6 tools), and an Upload / Install Theme tool for AI-generated themes. All new tools are OFF by default — enable them from MCP > Settings if you want them.

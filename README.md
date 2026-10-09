@@ -4,7 +4,7 @@
 
 > **By [WebSensePro](https://websensepro.com) — Official Shopify Partner & WordPress Agency**
 
-[![Version](https://img.shields.io/badge/Version-2.9.4-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
+[![Version](https://img.shields.io/badge/Version-2.9.5-blue?style=for-the-badge)](https://github.com/bilalnaseer/wsp-wordpress-mcp/releases)
 [![YouTube](https://img.shields.io/badge/YouTube-140K%2B%20Subscribers-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/websensepro)
 [![License](https://img.shields.io/badge/License-GPL%202.0-green?style=for-the-badge)](LICENSE)
 
@@ -61,7 +61,13 @@ WSP MCP is a **free MCP plugin for WordPress**. Install it, connect your AI app,
 
 ---
 
-## ✨ What's New in v2.9.4
+## ✨ What's New in v2.9.5
+
+- 🛒 **WooCommerce store management** — 34 new tools: delete products, variations, coupons, categories and tags (trash by default); manage product categories, tags, global attributes and terms; read and update store settings, tax rates, shipping zones and methods, and payment gateways. Products can now be created and updated with categories, tags and attributes. Secrets (keys, tokens, passwords) are always masked.
+- 🔌 **Plugin management** — install a plugin from WordPress.org or an https .zip URL, update it, or delete it (must be deactivated first). Administrators only.
+- All new tools are **off by default** — enable them in MCP > Settings.
+
+## v2.9.4
 
 - 🎨 **Site Editor tool group** — six tools for block themes: read and update Global Styles (colors, typography, spacing, style variations) and list, read, create and update block templates and template parts.
 - 🧱 **Widgets & Sidebars tool group** — eight tools for classic themes: list widget areas and types, and read, create, update, move and delete widgets.
