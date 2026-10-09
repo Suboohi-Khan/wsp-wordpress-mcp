@@ -1,6 +1,6 @@
 <?php
 /**
- * MCP > Context admin page (unreleased).
+ * MCP > Context admin page (v2.9.5).
  *
  * Lets the site admin switch on "Site Context" and edit the two Markdown
  * documents (AGENTS.md, CHANGELOG.md) that connected agents receive first.

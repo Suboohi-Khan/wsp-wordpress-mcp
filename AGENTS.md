@@ -100,7 +100,7 @@ where real-world stray output actually happens, is covered.
   (`wsp_mcp_oauth_clients` / `_codes` / `_tokens`), daily cron `wsp_mcp_oauth_cleanup`. **Read the
   invariants below before touching either file.**
 
-**Server instructions & resources (unreleased):** `initialize` may carry an `instructions` string and `capabilities.resources`, and `resources/list|read` serve real documents — all driven by the admin's Site Context feature, see **"### Site Context"** below. A tool spec may use `active_callback` (fn(): bool) instead of `enable_key`.
+**Server instructions & resources (v2.9.5):** `initialize` may carry an `instructions` string and `capabilities.resources`, and `resources/list|read` serve real documents — all driven by the admin's Site Context feature, see **"### Site Context"** below. A tool spec may use `active_callback` (fn(): bool) instead of `enable_key`.
 
 **Tools (`includes/tools/native-tools.php`):** `wsp_mcp_register_native_tools()` registers every
 tool with `WSP_MCP_Server::register_tool($name, $spec)`. It **reuses the existing
@@ -206,7 +206,7 @@ wsp-wordpress-mcp/                        ← repo root (NOT the plugin — docs
         │                          before any other include
         ├── dependency.php      ← stub: wsp_mcp_transport_available() (always true) — kept for back-compat
         ├── registry.php        ← central ability registry + settings helpers
-        ├── context.php         ← Site Context (unreleased): admin-written AGENTS.md/CHANGELOG.md storage + delivery to agents
+        ├── context.php         ← Site Context (v2.9.5): admin-written AGENTS.md/CHANGELOG.md storage + delivery to agents
         ├── server/             ← v2.0 native MCP server
         │   ├── class-mcp-server.php     ← transport + JSON-RPC dispatch + tool registry
         │   ├── class-session-store.php  ← DB-backed sessions
@@ -911,7 +911,7 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
       the same pattern (verify the exact scheme/param shape against that vendor's docs before
       shipping — see the Cursor link above for the level of confirmation expected).
 
-### Site Context — `context.php` + `admin/context-page.php` (unreleased)
+### Site Context — `context.php` + `admin/context-page.php` (v2.9.5)
 
 - **Purpose:** the admin writes `AGENTS.md` and `CHANGELOG.md` for *their site* (not this repo's docs) on
   **MCP > Context**; a connected agent gets them first, so it doesn't crawl the site to learn its structure

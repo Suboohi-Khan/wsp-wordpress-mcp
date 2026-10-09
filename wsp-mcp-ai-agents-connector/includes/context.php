@@ -1,6 +1,6 @@
 <?php
 /**
- * Site Context (AGENTS.md + CHANGELOG.md) — unreleased.
+ * Site Context (AGENTS.md + CHANGELOG.md) — v2.9.5.
  *
  * The site admin writes two Markdown documents on MCP > Context:
  *   - AGENTS.md    — how this site is built and how an agent should work on it
