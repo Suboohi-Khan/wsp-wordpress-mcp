@@ -13,6 +13,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Site Context write tool `wsp_update_site_context` (`includes/context.php`)
+
+- Agents can now write the site's AGENTS.md / CHANGELOG.md over MCP instead of the admin pasting them into
+  MCP > Context. Inputs: `file` (agents|changelog), `content`, `mode` (replace|append|prepend), optional
+  `enable` (sets the Site Context switch). Large files go in chunks: first `replace`, then `append`.
+  Response carries `total_chars` + `sha256` so the agent can verify the upload.
+- Registry toggle `wsp/update-site-context` (group **Site**, OFF by default), capability `manage_options`.
+  Deliberately a normal `enable_key` tool, not tied to the Context switch's `active_callback`, so it can fill
+  an empty Context page.
+- `WSP_MCP_CONTEXT_MAX_CHARS` raised 50,000 → 300,000: a real-world AGENTS.md (~106 KB) didn't fit. The pushed
+  `initialize` head is unchanged (6,000 / 1,500 chars). The tool refuses over-limit writes instead of truncating;
+  the admin page's "Load from file" now warns instead of silently cutting the file.
+- `wsp_mcp_context_sanitize()` gained a `$trim` flag (default true); the tool passes false so chunk boundaries
+  that fall on whitespace/newlines are preserved.
+
 ### Added — Revisions ability group (`includes/abilities/revisions.php` — new file)
 
 - `wsp_get_revisions`, `wsp_get_revision`, `wsp_restore_revision`: list a post's revisions, read one next

@@ -399,6 +399,7 @@ admin toggle for each is driven by its entry in `wsp_mcp_ability_registry()` (`r
 | `wsp/get-plugins` | Read Plugins | read | OFF | `activate_plugins` | none |
 | `wsp/update-site-info` | Update Site Info | write | OFF | `manage_options` | `name`, `tagline`, `admin_email` |
 | `wsp/update-permalink-structure` | Update Permalink Structure | write | OFF | `manage_options` | `structure`* (e.g. `/%postname%/`; empty string = plain) |
+| `wsp/update-site-context` | Update Site Context | write | OFF | `manage_options` | `file`* (agents\|changelog), `content`*, `mode` (replace\|append\|prepend), `enable` — callback lives in `context.php`, see "### Site Context" |
 | `wsp/activate-plugin` | Activate Plugin | write | OFF | `activate_plugins` | `file`* (e.g. `akismet/akismet.php`) |
 | `wsp/deactivate-plugin` | Deactivate Plugin | write | OFF | `activate_plugins` | `file`* |
 
@@ -997,10 +998,18 @@ Only registered if `wsp_uae_is_active()`. Adds 45 tools to manipulate UAE widget
      `WSP_MCP_Server::enabled_tools()` honours `active_callback` before `enable_key`.
   3. Resources `wsp://context/agents.md` / `wsp://context/changelog.md` (`resources/list`, `resources/read`; unknown
      URI → JSON-RPC error `-32002`).
+- **Write tool `wsp_update_site_context` (unreleased):** `wsp_execute_update_site_context()` in `context.php`. Inputs
+  `file`* (agents|changelog), `content`*, `mode` (replace|append|prepend, default replace), `enable` (bool, sets the
+  master switch). Registry key `wsp/update-site-context` (group **Site**, OFF by default), capability `manage_options`.
+  Unlike the read tool it uses a normal `enable_key`, **not** `active_callback`, so it works while the Context page is
+  still empty/off. Large files are sent in chunks (`replace` then `append`); content is sanitized with `$trim = false`
+  so chunk boundaries survive. Over-limit writes return `WP_Error( 'too_large' )` — never truncate silently. Response
+  includes `total_chars` and `sha256` for verification. No `wp_unslash()` (MCP args are never slashed).
 - **Sanitization:** documents are admin-authored plain text, never rendered as HTML (admin textarea uses
-  `esc_textarea()`, MCP output is JSON), so `wsp_mcp_context_sanitize()` normalises UTF-8/newlines, drops control
-  characters and caps at `WSP_MCP_CONTEXT_MAX_CHARS` (50,000) — it deliberately does **not** strip tags, since Markdown
-  contains `<placeholders>`/inline HTML. Don't "fix" this with `wp_kses_post()`; it would corrupt the documents.
+  `esc_textarea()`, MCP output is JSON), so `wsp_mcp_context_sanitize( $text, $trim = true )` normalises UTF-8/newlines,
+  drops control characters and caps at `WSP_MCP_CONTEXT_MAX_CHARS` (300,000; was 50,000) — it deliberately does **not**
+  strip tags, since Markdown contains `<placeholders>`/inline HTML. Don't "fix" this with `wp_kses_post()`; it would
+  corrupt the documents. The admin "Load from file" picker alerts when a file exceeds the limit.
 - **Trust/leak note (do not regress):** the tool has capability `''` and `instructions` go to every authenticated
   client, including low-privilege Application Password users — the page tells admins never to put secrets in these
   documents. Don't add anything dynamic (user data, options, keys) to the pushed text.

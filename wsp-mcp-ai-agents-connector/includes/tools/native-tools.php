@@ -30,6 +30,19 @@ function wsp_mcp_register_native_tools() {
 		'enable_key'      => '',
 		'active_callback' => 'wsp_mcp_context_is_active',
 	) );
+	// Write side: a normal registry toggle (OFF by default), independent of the Context switch so it can fill an empty page.
+	WSP_MCP_Server::register_tool( 'wsp_update_site_context', array(
+		'description' => 'Write the site\'s AGENTS.md or CHANGELOG.md (the Site Context every connected agent reads first). For a large file, send the first chunk with mode=replace and the rest in order with mode=append (keep each chunk under ~40,000 characters); check total_chars / sha256 in the response. Never include passwords or API keys — every connected agent can read these documents.',
+		'inputSchema' => array( 'type' => 'object', 'required' => array( 'file', 'content' ), 'properties' => array(
+			'file'    => array( 'type' => 'string', 'enum' => array( 'agents', 'changelog' ), 'description' => 'agents = AGENTS.md, changelog = CHANGELOG.md.' ),
+			'content' => array( 'type' => 'string', 'description' => 'Markdown text. Empty string with mode=replace clears the document.' ),
+			'mode'    => array( 'type' => 'string', 'enum' => array( 'replace', 'append', 'prepend' ), 'description' => 'replace (default) | append | prepend (e.g. add a new changelog entry at the top).' ),
+			'enable'  => array( 'type' => 'boolean', 'description' => 'Optional. Also turn the Site Context switch on (true) or off (false).' ),
+		) ),
+		'callback'    => 'wsp_execute_update_site_context',
+		'capability'  => 'manage_options',
+		'enable_key'  => 'wsp/update-site-context',
+	) );
 
 	// ---- Posts ----
 	WSP_MCP_Server::register_tool( 'wsp_get_posts', array(
