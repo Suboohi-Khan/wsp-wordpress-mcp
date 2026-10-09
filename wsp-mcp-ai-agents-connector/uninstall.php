@@ -8,6 +8,9 @@ delete_option( 'wsp_mcp_api_key' );
 delete_option( 'wsp_mcp_db_version' );
 delete_option( 'wsp_mcp_oauth_enabled' );
 delete_option( 'wsp_mcp_first_success' );
+delete_option( 'wsp_mcp_context_enabled' );
+delete_option( 'wsp_mcp_context_agents' );
+delete_option( 'wsp_mcp_context_changelog' );
 delete_metadata( 'user', 0, 'wsp_mcp_review_notice', '', true );
 
 wp_clear_scheduled_hook( 'wsp_mcp_session_cleanup' );

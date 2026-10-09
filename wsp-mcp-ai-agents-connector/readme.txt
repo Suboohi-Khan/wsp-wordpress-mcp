@@ -38,6 +38,7 @@ MCP (Model Context Protocol) is the standard way AI assistants connect to other 
 * **100% free.** Every feature and every tool, no paid version.
 * **Easy to connect.** A Connection page with ready-made setup for Claude, Cursor, Codex, Antigravity, OpenClaw and OpenCode, with copy and download buttons. Cursor users can connect in one click.
 * **Safe by default.** Only read-only tools are on when you install. You pick what else the AI can do.
+* **Teach the AI your site.** Write an AGENTS.md and CHANGELOG.md once; connected AIs read them first instead of exploring your whole site.
 * **See everything the AI did.** The Audit Log records every action: what, when, and by whom.
 * **Usage dashboard.** See how often the AI is used, which tools are most popular, and how fast they respond.
 * **Your data stays on your site.** Logs and stats are stored in your own database, never sent anywhere.
@@ -122,6 +123,7 @@ https://youtu.be/hxhjs3IUYQE
 == Changelog ==
 
 = 2.9.5 =
+* New: Site Context — a new MCP > Context page where you write AGENTS.md (how your site is built and the rules to follow) and CHANGELOG.md (what changed and why). Turn on "Enable Site Context" (off by default) and every connected AI reads them first, so it doesn't have to explore your whole site. This saves time and tokens. Also available through the `wsp_get_site_context` tool and as MCP resources. Reconnect your AI app after editing. Don't put passwords or keys in these documents.
 * New: WooCommerce store management — 34 tools. Delete products, variations, coupons, categories and tags (products, variations and coupons go to the trash unless you ask for permanent deletion). Manage product categories, tags, global attributes and attribute terms. Read and update WooCommerce settings, tax classes and rates, shipping zones and methods, and payment gateways. Create and update products can now set categories, tags and attributes. Passwords, keys and tokens are always masked and never written back.
 * New: Plugin management — Install Plugin from WordPress.org (`wsp_install_plugin`), Install Plugin From URL (`wsp_install_plugin_from_url`, https .zip only), Delete Plugin (`wsp_delete_plugin`, must be deactivated first) and Update Plugin (`wsp_update_plugin`). They use WordPress's own installer and require the `install_plugins`, `delete_plugins` and `update_plugins` capabilities (administrators; respects DISALLOW_FILE_MODS).
 * Improved: Read Plugins (`wsp_get_plugins`) now lists every installed plugin with its active state and available update. Create Category (`wsp_create_category`) can also create WooCommerce product categories.
@@ -259,7 +261,7 @@ https://youtu.be/hxhjs3IUYQE
 == Upgrade Notice ==
 
 = 2.9.5 =
-Adds 34 WooCommerce store-management tools (delete, categories, tags, attributes, settings, tax, shipping, payment gateways) and 4 plugin-management tools (install, install from URL, delete, update). All new tools are OFF by default — enable them from MCP > Settings if you want them.
+Adds Site Context (MCP > Context, off by default): give your AI an AGENTS.md and CHANGELOG.md to read first. Also adds 34 WooCommerce store-management tools (delete, categories, tags, attributes, settings, tax, shipping, payment gateways) and 4 plugin-management tools (install, install from URL, delete, update). All new tools are OFF by default — enable them from MCP > Settings if you want them.
 
 = 2.9.4 =
 Adds a Site Editor tool group (Global Styles + block templates, 6 tools) for block themes , a Widgets & Sidebars tool group (8 tools) for classic themes, a Site Health, Cron & Error Log tool group (6 tools), and an Upload / Install Theme tool for AI-generated themes. All new tools are OFF by default — enable them from MCP > Settings if you want them.

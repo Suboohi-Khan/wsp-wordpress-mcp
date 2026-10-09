@@ -63,6 +63,7 @@ WSP MCP is a **free MCP plugin for WordPress**. Install it, connect your AI app,
 
 ## ✨ What's New in v2.9.5
 
+- 🧭 **Site Context** — new **MCP > Context** page: write `AGENTS.md` (how your site is built, rules for agents) and `CHANGELOG.md` (what changed and why), switch on **Enable Site Context** (off by default), and every connected agent reads them first instead of exploring the whole site — fewer tokens, less time. Delivered as server instructions on connect, via the `wsp_get_site_context` tool, and as MCP resources. Reconnect the client after editing; don't store secrets in these documents.
 - 🛒 **WooCommerce store management** — 34 new tools: delete products, variations, coupons, categories and tags (trash by default); manage product categories, tags, global attributes and terms; read and update store settings, tax rates, shipping zones and methods, and payment gateways. Products can now be created and updated with categories, tags and attributes. Secrets (keys, tokens, passwords) are always masked.
 - 🔌 **Plugin management** — install a plugin from WordPress.org or an https .zip URL, update it, or delete it (must be deactivated first). Administrators only.
 - All new tools are **off by default** — enable them in MCP > Settings.

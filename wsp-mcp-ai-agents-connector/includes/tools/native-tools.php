@@ -19,6 +19,18 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 function wsp_mcp_register_native_tools() {
 	$obj = array( 'type' => 'object', 'properties' => new stdClass() );
 
+	// ---- Site Context (MCP > Context) — advertised only while the admin's switch is on and a document has content ----
+	WSP_MCP_Server::register_tool( 'wsp_get_site_context', array(
+		'description' => 'READ THIS FIRST. Returns the site administrator\'s AGENTS.md (how this site is built and the rules to follow) and CHANGELOG.md (what changed and why). Call once at the start of a session instead of exploring the site with other tools.',
+		'inputSchema' => array( 'type' => 'object', 'properties' => array(
+			'file' => array( 'type' => 'string', 'description' => 'all (default) | agents | changelog.' ),
+		) ),
+		'callback'        => 'wsp_execute_get_site_context',
+		'capability'      => '',
+		'enable_key'      => '',
+		'active_callback' => 'wsp_mcp_context_is_active',
+	) );
+
 	// ---- Posts ----
 	WSP_MCP_Server::register_tool( 'wsp_get_posts', array(
 		'description' => 'Returns blog posts with full metadata.',

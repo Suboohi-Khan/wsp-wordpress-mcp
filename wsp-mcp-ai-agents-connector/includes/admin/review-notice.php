@@ -93,7 +93,7 @@ function wsp_mcp_review_is_allowed_screen() {
 	}
 	// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only screen check.
 	$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
-	return in_array( $page, array( 'wsp-mcp-abilities', 'wsp-mcp-connection', 'wsp-mcp-audit-log', 'wsp-mcp-analytics' ), true );
+	return in_array( $page, array( 'wsp-mcp-abilities', 'wsp-mcp-connection', 'wsp-mcp-context', 'wsp-mcp-audit-log', 'wsp-mcp-analytics' ), true );
 }
 
 /** Render the notice on the Plugins screen and the MCP pages. */

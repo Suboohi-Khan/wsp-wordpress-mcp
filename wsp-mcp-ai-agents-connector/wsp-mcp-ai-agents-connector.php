@@ -28,9 +28,11 @@ wsp_mcp_output_guard_start();
 
 require_once WSP_MCP_DIR . 'includes/dependency.php';
 require_once WSP_MCP_DIR . 'includes/registry.php';
+require_once WSP_MCP_DIR . 'includes/context.php';
 require_once WSP_MCP_DIR . 'includes/admin/promo-cards.php';
 require_once WSP_MCP_DIR . 'includes/admin/settings-page.php';
 require_once WSP_MCP_DIR . 'includes/admin/connection-page.php';
+require_once WSP_MCP_DIR . 'includes/admin/context-page.php';
 require_once WSP_MCP_DIR . 'includes/admin/audit-log-page.php';
 require_once WSP_MCP_DIR . 'includes/admin/analytics-page.php';
 require_once WSP_MCP_DIR . 'includes/admin/about-page.php';
